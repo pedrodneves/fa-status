@@ -397,6 +397,20 @@ p, dl, dd { margin: 0; }
 .status-box > .status-action { overflow-wrap: anywhere; }
 .status-box .when { font-size: 13px; color: var(--muted); }
 
+/* ---- Latest email from the committee ------------------------------------ */
+.p-update {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.p-update .update-title { font-weight: 600; }
+.p-update .status-action { justify-self: start; max-width: 100%; overflow-wrap: anywhere; }
+.p-update .when { font-size: 13px; color: var(--muted); }
+
 /* ---- Pills --------------------------------------------------------------- */
 .pill {
   display: inline-flex;

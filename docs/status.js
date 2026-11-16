@@ -30,6 +30,7 @@
  * Answer shapes (see "Response contract" in DESIGN.md):
  *   GET  { found: true, apps: [{ id, name, institution, type, submitted, state,
  *                                lock, testing, partyId, website, announcement,
+ *                                update: { kind, date } | null,
  *                                updated, dvp: [{ id, name, state, submitted,
  *                                finalApproval, requestUrl, requestRef, updated }] }] }
  *        { found: false }
@@ -214,6 +215,44 @@
         closed_process: { title: 'Closed', detail: 'Review process changed' },
         revoked: { title: 'Featured status revoked', detail: '' }
       },
+      // The latest email from the committee (the Send Email column on Monday:
+      // each label there sends one email). The label stays after the
+      // applicant replies, so the wording says what the email asked, never
+      // that something is still outstanding. `link: 'reapply'` adds a link to
+      // config.reapplyUrl. Unknown kinds show nothing.
+      update: {
+        heading: 'Latest email from the committee',
+        emailed: 'Emailed {date}',
+        kinds: {
+          office_hours: {
+            title: 'Office hours invitation',
+            text: "The Featured App Accountability Committee invited you to its office hours to discuss your app. If you haven't booked a time yet, use the link in our email."
+          },
+          endorsements: {
+            title: 'Endorsements from your users',
+            text: 'We explained how your users can endorse your request on the tokenomics mailing list. Endorsements show the committee your real user base.'
+          },
+          fa_type_info: {
+            title: 'Information for Traffic-Based App Rewards',
+            text: "We asked for your Featured App type and your App Operations PartyIDs. If you haven't sent them yet, use the form in our email."
+          },
+          locking_check: {
+            title: 'Canton Coin lock check',
+            text: "The locking party we have on file didn't hold the full balance. If you haven't replied yet, please answer our email so we can update your records."
+          },
+          resubmit: {
+            title: 'Resubmission requested',
+            text: "The review process changed, so we asked every applicant under review to resubmit with the new form. This isn't a decision on your application.",
+            link: 'reapply',
+            linkText: 'Apply under the current process ↗'
+          },
+          declined: {
+            title: 'Application closed',
+            text: "The committee found that the app isn't ready for approval yet. You can apply again after three months, once the issues are addressed. Our email has the details."
+          }
+        }
+      },
+
       // Testing (from the Testing Process column). Unknown values: in_progress.
       // `flag` is a pill shown next to the step title.
       testing: {
@@ -925,6 +964,7 @@
         submittedText(app.submitted)
       ])),
       statusBox(state, words, faStatusExtra(app, state, words), app.updated),
+      updateSection(app),
       timeline(TEXT.fa.progressLabel, faSteps(app, state)),
       onFileSection(app),
       dvpListSection(code, apps, app),
@@ -943,6 +983,23 @@
       return reapply ? externalLink(reapply, words.linkText, 'status-action p-btn secondary') : null;
     }
     return words.contact ? contactLine() : null;
+  }
+
+  /** "Latest email from the committee" (app.update); null when there is none or its kind is unknown. */
+  function updateSection(app) {
+    const update = isObject(app.update) ? app.update : null;
+    const kind = update ? textOf(update.kind) : '';
+    if (!kind || !hasOwn(TEXT.fa.update.kinds, kind)) return null;
+    const words = TEXT.fa.update.kinds[kind];
+    const date = formatDate(update.date);
+    const link = words.link === 'reapply' ? parseHttpsUrl(CONFIG.reapplyUrl) : null;
+    return el('section', { class: 'p-update', 'data-update': kind, 'aria-label': TEXT.fa.update.heading }, [
+      el('p', { class: 'd-eyebrow', text: TEXT.fa.update.heading }),
+      el('p', { class: 'update-title', text: words.title }),
+      el('p', { text: words.text }),
+      link ? externalLink(link, words.linkText, 'status-action') : null,
+      date ? el('p', { class: 'when', text: fillText(TEXT.fa.update.emailed, { date: date }) }) : null
+    ]);
   }
 
   /** "On file": Party ID and product site; null when both are missing. */

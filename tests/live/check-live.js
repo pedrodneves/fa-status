@@ -74,7 +74,7 @@ check('setup and refresh ran against the real boards', stats && stats.faRows > 0
 const setupLine = JSON.parse(env.logs.find((l) => l.text.indexOf('"mode":"setup"') !== -1).text);
 check('no expected column is missing on either board', setupLine.missingColumns.fa.length === 0 && setupLine.missingColumns.dvp.length === 0,
   JSON.stringify(setupLine.missingColumns));
-check('every FA Status / Testing / DVP label is known', ['fa', 'testing', 'dvp'].every((b) => Object.keys(JSON.parse(env.logs.filter((l) => l.text.indexOf('"mode":"refresh"') !== -1).pop().text).unknownLabels[b]).length === 0));
+check('every FA Status / Testing / DVP / Send Email label is known', ['fa', 'testing', 'dvp', 'email'].every((b) => Object.keys(JSON.parse(env.logs.filter((l) => l.text.indexOf('"mode":"refresh"') !== -1).pop().text).unknownLabels[b]).length === 0));
 check('largest cache shard is well under 100 KB', stats.cacheLargestShard < 60000, stats.cacheLargestShard + ' bytes');
 console.log('     addresses ' + stats.addresses + ', apps reachable ' + stats.appsServed + ', apps without an email ' + stats.appsWithoutEmail +
   ', DVP matched ' + stats.dvpMatched + ', unmatched ' + stats.dvpUnmatched);
@@ -108,7 +108,7 @@ answers.split('\n').forEach((line) => {
   (body.apps || []).forEach((a) => { Object.keys(a).forEach((k) => keys.add('app.' + k)); (a.dvp || []).forEach((d) => Object.keys(d).forEach((k) => keys.add('dvp.' + k))); });
 });
 const allowed = ['app.id', 'app.name', 'app.institution', 'app.type', 'app.submitted', 'app.state', 'app.lock', 'app.testing', 'app.partyId',
-  'app.website', 'app.announcement', 'app.updated', 'app.dvp', 'dvp.id', 'dvp.name', 'dvp.state', 'dvp.submitted', 'dvp.finalApproval',
+  'app.website', 'app.announcement', 'app.update', 'app.updated', 'app.dvp', 'dvp.id', 'dvp.name', 'dvp.state', 'dvp.submitted', 'dvp.finalApproval',
   'dvp.requestUrl', 'dvp.requestRef', 'dvp.updated'];
 check('answers carry only allow-listed fields', Array.from(keys).every((k) => allowed.indexOf(k) !== -1), keys.size + ' distinct fields');
 

@@ -50,7 +50,8 @@ const cv = {
 /**
  * A raw FA item in Monday's shape. Every field optional.
  * f = {id, name, institution, email, responsible, status, statusChangedAt, type,
- *      submitted, lockVerified, lockedAmount, testing, partyId, website, announcement}
+ *      submitted, lockVerified, lockedAmount, testing, partyId, website, announcement,
+ *      sendEmail, sendEmailChangedAt}
  */
 function faItem(f) {
   const cols = [
@@ -64,6 +65,7 @@ function faItem(f) {
     cv.longText('long_text_mm4kq322', f.partyId),
     cv.link('link_mm4kmq24', f.website),
     cv.link('link_mm6hfp5g', f.announcement),
+    cv.status('color_mm6eay19', f.sendEmail, f.sendEmailChangedAt),
     cv.email('email_mm4ke170', f.email),
     cv.text('text_mm4kvrar', f.responsible)
   ];

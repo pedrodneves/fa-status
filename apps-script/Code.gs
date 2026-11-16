@@ -133,7 +133,8 @@ const FA_COLUMNS = {
   testing: 'color_mm6be9ge',        // Testing Process (status)
   partyId: 'long_text_mm4kq322',    // Party ID for the Featured Application (long text)
   website: 'link_mm4kmq24',         // Product Website (link)
-  announcement: 'link_mm6hfp5g'     // "FA Link" (link): shown only once approved
+  announcement: 'link_mm6hfp5g',    // "FA Link" (link): shown only once approved
+  sendEmail: 'color_mm6eay19'       // Send Email (status): which email the committee last sent
 };
 
 /**
@@ -248,6 +249,24 @@ const DVP_STATE_BY_LABEL = {
 };
 const DVP_STATE_EMPTY = 'in_review';
 const DVP_STATE_UNKNOWN = 'in_review';
+
+/**
+ * Send Email label -> the email the committee sent (a Monday automation
+ * sends one email per label). The page shows the latest one, with the date
+ * the label was set. "Working on it", "Done", "Stuck" and an empty cell send
+ * nothing, so they show nothing. Any other label shows nothing and is logged.
+ */
+const EMAIL_UPDATE_BY_LABEL = {
+  'Office Hour Request': 'office_hours',    // "FAAC Office Hours Request": book a slot
+  'Endorsements': 'endorsements',           // how to get endorsements from your users
+  'FA Type Email': 'fa_type_info',          // TBAR: FA type and App Operations PartyIDs
+  'Locking Check': 'locking_check',         // the locking party lacks the full balance
+  'Updated Process': 'resubmit',            // resubmit with the revised form
+  'Decline': 'declined',                    // not ready; reapply after three months
+  'Working on it': null,
+  'Done': null,
+  'Stuck': null
+};
 
 // -----------------------------------------------------------------------------
 // Formats
@@ -1502,7 +1521,7 @@ function stateFor_(label, map, emptyState, unknownState, stats, bucket) {
  *
  *   id, name, institution, type, submitted, state,
  *   lock {verified, amountMillions}, testing, partyId,
- *   website, announcement, updated, dvp[]
+ *   website, announcement, update {kind, date}, updated, dvp[]
  *
  * Texts are capped and empty ones become null. Links are https-only,
  * otherwise null. announcement is only sent once approved. amountMillions is
@@ -1537,6 +1556,7 @@ function toApplicantView(row, dvpRows, stats) {
     partyId: capText_(longTextOf_(cols[FA_COLUMNS.partyId]), PARTY_ID_MAX),
     website: httpsUrl_(linkOf_(cols[FA_COLUMNS.website]).url),
     announcement: state === 'approved' ? httpsUrl_(linkOf_(cols[FA_COLUMNS.announcement]).url) : null,
+    update: emailUpdate_(cols[FA_COLUMNS.sendEmail], stats),
     updated: latestChangeDate_([
       cols[FA_COLUMNS.status],
       cols[FA_COLUMNS.testing],
@@ -1545,6 +1565,26 @@ function toApplicantView(row, dvpRows, stats) {
     ]),
     dvp: dvp
   };
+}
+
+/**
+ * The latest email the committee sent, from the Send Email column: its kind
+ * (see EMAIL_UPDATE_BY_LABEL) and the date the label was set.
+ *
+ * @param {?Object} column Raw Send Email column value.
+ * @param {Object=} stats Run stats, for unknown-label counting.
+ * @return {?{kind: string, date: ?string}} null when the label sends no
+ *     email (or is empty or unknown).
+ */
+function emailUpdate_(column, stats) {
+  const label = statusText_(column);
+  if (!label) return null;
+  if (!hasOwn_(EMAIL_UPDATE_BY_LABEL, label)) {
+    noteUnknownLabel_(stats, 'email', label);
+    return null;
+  }
+  const kind = EMAIL_UPDATE_BY_LABEL[label];
+  return kind ? { kind: kind, date: latestChangeDate_([column]) } : null;
 }
 
 /**
@@ -1704,7 +1744,7 @@ function newStats_(mode) {
     dvpUnmatched: 0,      // DVP requests whose name matches no FA app
     cacheLargestShard: 0, // bytes
     ms: 0,
-    unknownLabels: { fa: {}, testing: {}, dvp: {} }
+    unknownLabels: { fa: {}, testing: {}, dvp: {}, email: {} }
   };
 }
 
@@ -1723,7 +1763,8 @@ function logRun_(stats, errorKind) {
   line.unknownLabels = {
     fa: countsOnly_(stats.unknownLabels.fa),
     testing: countsOnly_(stats.unknownLabels.testing),
-    dvp: countsOnly_(stats.unknownLabels.dvp)
+    dvp: countsOnly_(stats.unknownLabels.dvp),
+    email: countsOnly_(stats.unknownLabels.email)
   };
   if (errorKind) {
     line.error = errorKind;
@@ -1753,7 +1794,7 @@ function countsOnly_(map) {
  * data, so they may be logged (capped at LOG_LABEL_MAX characters).
  *
  * @param {Object=} stats Run stats (nothing happens without them).
- * @param {string} bucket 'fa', 'testing' or 'dvp'.
+ * @param {string} bucket 'fa', 'testing', 'dvp' or 'email'.
  * @param {string} label The unknown label.
  */
 function noteUnknownLabel_(stats, bucket, label) {

@@ -57,6 +57,7 @@ trigger (10 min) ─────────▶ refresh ── read FA + DVP boa
 | partyId | `long_text_mm4kq322` | Party ID for the Featured Application |
 | website | `link_mm4kmq24` | Product Website |
 | announcement | `link_mm6hfp5g` | FA Link (sent only once approved) |
+| update | `color_mm6eay19` | Send Email (the latest committee email) |
 
 **Read but never sent anywhere:** `email_mm4ke170` and `text_mm4kvrar`, which decide who may see a row. **Never requested:** every other column (Entry ID, FAAC notes, tester, Slack fields, Tier, sponsors, tags, form answers…).
 
@@ -102,6 +103,7 @@ The backend sends state keys; all page wording lives in `docs/status.js`.
 Any other label is treated as `in_review` and logged under `unknownLabels`.
 
 - **Testing:** empty → `not_started`; Sent Email → `action_needed`; Pending Review or Stuck → `in_progress`; Done → `complete`.
+- **Send Email** (`color_mm6eay19`): each label triggers one email from a Monday automation. The page shows the latest one as "Latest email from the committee", with the date the label was set (`update: {kind, date}`). Mapping: Office Hour Request → `office_hours`, Endorsements → `endorsements`, FA Type Email → `fa_type_info`, Locking Check → `locking_check`, Updated Process → `resubmit`, Decline → `declined`. Working on it, Done, Stuck and empty send nothing and show nothing. The label stays after the applicant replies, so the wording describes what the email asked rather than claiming it's still outstanding.
 - **DVP:** New Submission → `in_review`; FAAC Approval → `with_tokenomics`; Tokenomics Apporval (the board's spelling) → `approved`; Denied → `not_approved`; Closed → `closed`.
 
 ## Response contract
@@ -124,6 +126,7 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
       "partyId": "harborswap-1::1220…",
       "website": "https://harborswap.example",
       "announcement": null,
+      "update": { "kind": "office_hours", "date": "2026-11-16" },
       "updated": "2026-11-03",
       "dvp": [
         { "id": "13454645978", "name": "Harbor Swap (RFQ)", "state": "in_review", "submitted": "2026-10-20",

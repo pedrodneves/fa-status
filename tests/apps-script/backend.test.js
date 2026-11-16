@@ -14,11 +14,11 @@ const SECRET = 'test-secret-0123456789abcdef0123456789abcdef';
 const PROPS = { MONDAY_API_TOKEN: 'test-token-xyz', SITE_URL: 'https://status.example.org', LINK_SECRET: SECRET };
 
 const ALLOWED_FA = ['text_mm4k2vch', 'color_mm4kmej3', 'color_mm4kpp3q', 'date_mm4kw11a', 'date_mm4kpckv',
-  'numeric_mm4k6919', 'color_mm6be9ge', 'long_text_mm4kq322', 'link_mm4kmq24', 'link_mm6hfp5g'];
+  'numeric_mm4k6919', 'color_mm6be9ge', 'long_text_mm4kq322', 'link_mm4kmq24', 'link_mm6hfp5g', 'color_mm6eay19'];
 const EMAIL_COLUMNS = ['email_mm4ke170', 'text_mm4kvrar'];
 const ALLOWED_DVP = ['date_mm8dsx4y', 'date_mm8dm7a0', 'link_mm8rp25j', 'color_mm8dhgvr'];
 const APP_KEYS = ['id', 'name', 'institution', 'type', 'submitted', 'state', 'lock', 'testing', 'partyId',
-  'website', 'announcement', 'updated', 'dvp'];
+  'website', 'announcement', 'update', 'updated', 'dvp'];
 const DVP_KEYS = ['id', 'name', 'state', 'submitted', 'finalApproval', 'requestUrl', 'requestRef', 'updated'];
 
 /** Seven FA rows and four DVP requests covering the interesting cases. */
@@ -30,13 +30,13 @@ function fixture() {
         responsible: 'bob@harbor.example; Carol <carol@harbor.example>', status: '1b-FAAC Approved-waiting on tokenomics',
         statusChangedAt: '2026-10-20T10:00:00Z', type: 'Non-Issuer', submitted: '2026-09-01', lockVerified: '2026-09-10',
         lockedAmount: 1.5, testing: 'Done', partyId: 'harbor::1220abcd', website: 'https://harbor.example',
-        announcement: 'https://lists.example/announce/1'
+        announcement: 'https://lists.example/announce/1', sendEmail: 'Office Hour Request', sendEmailChangedAt: '2026-11-12T09:30:00Z'
       }),
       faItem({
         id: 102, name: 'Harbor Vault', institution: 'Harbor Labs', email: 'alice@harbor.example', status: '2-Approved',
         submitted: '2026-10-01', announcement: 'https://lists.example/vault', website: 'javascript:alert(1)'
       }),
-      faItem({ id: 103, name: 'Orbit Ledger', institution: 'Orbit Inc', email: 'dev@orbit.example', status: '4-No', submitted: '2026-08-01' }),
+      faItem({ id: 103, name: 'Orbit Ledger', institution: 'Orbit Inc', email: 'dev@orbit.example', status: '4-No', submitted: '2026-08-01', sendEmail: 'Working on it' }),
       faItem({ id: 104, name: 'No Contact App', institution: 'Ghost Co', status: '1-Needs Review' }),
       faItem({ id: 105, name: 'Lumen Wallet', institution: 'Lumen Labs', responsible: 'ops@lumen.example and cto@lumen.example', status: '2-Approved' }),
       faItem({ id: 106, name: 'Lumen Pay', institution: 'Lumen Labs', email: 'ops@lumen.example', status: 'Some New Label' }),
@@ -134,6 +134,28 @@ test('board labels map to state keys; unknown labels fall back and are counted',
   assert.equal(env.call('dvpState_', 'New Submission'), 'in_review');
 });
 
+test('Send Email labels become the latest committee email; labels that send nothing show nothing', () => {
+  const { env } = setupEnv();
+  const update = (label, changedAt, stats) => {
+    const column = { id: 'color_mm6eay19', type: 'status', text: label, value: label ? JSON.stringify({ index: 1, changed_at: changedAt || null }) : null };
+    const out = env.call('emailUpdate_', column, stats);
+    return out ? JSON.parse(JSON.stringify(out)) : out;
+  };
+  assert.deepEqual(update('Office Hour Request', '2026-11-16T15:40:00Z'), { kind: 'office_hours', date: '2026-11-16' });
+  assert.deepEqual(update('Endorsements'), { kind: 'endorsements', date: null });
+  assert.equal(update('FA Type Email').kind, 'fa_type_info');
+  assert.equal(update('Locking Check').kind, 'locking_check');
+  assert.equal(update('Updated Process').kind, 'resubmit');
+  assert.equal(update('Decline').kind, 'declined');
+  ['Working on it', 'Done', 'Stuck', '', null].forEach((label) => assert.equal(update(label), null, String(label)));
+  const stats = env.call('newStats_', 'test');
+  assert.equal(update('Brand New Email', null, stats), null);
+  assert.equal(stats.unknownLabels.email['Brand New Email'], 1);
+
+  env.call('refresh');
+  assert.equal(appsOf(env, 'dev@orbit.example')[0].update, null, '"Working on it" sends no email');
+});
+
 test('DVP name keys: cut at the first qualifier, split on "/", exact matches only', () => {
   const { env } = setupEnv();
   const keys = (name) => Array.from(env.call('dvpNameKeys_', name));
@@ -193,7 +215,8 @@ test('the answer holds only allow-listed fields, links are https-only, approval-
   assert.deepEqual(swap, {
     id: '101', name: 'Harbor Swap', institution: 'Harbor Labs', type: 'Non-Issuer', submitted: '2026-09-01',
     state: 'with_tokenomics', lock: { verified: '2026-09-10', amountMillions: 1.5 }, testing: 'complete',
-    partyId: 'harbor::1220abcd', website: 'https://harbor.example', announcement: null, updated: '2026-10-20',
+    partyId: 'harbor::1220abcd', website: 'https://harbor.example', announcement: null,
+    update: { kind: 'office_hours', date: '2026-11-12' }, updated: '2026-10-20',
     dvp: [{ id: '9003', name: 'Harbor Swap (Aug request)', state: 'with_tokenomics', submitted: '2026-08-20', finalApproval: null, requestUrl: null, requestRef: null, updated: null }]
   });
   assert.equal(vault.state, 'approved');

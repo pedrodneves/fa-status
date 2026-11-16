@@ -289,6 +289,31 @@ test('approved: announcement link (https only); closed: reapply link; not approv
   await expect(page.locator('.status-contact a')).toHaveAttribute('href', 'mailto:ops@canton.foundation');
 });
 
+test('the latest committee email shows under the status, with its date; resubmit links to the new form', async ({ page }, testInfo) => {
+  let body = one({ update: { kind: 'office_hours', date: '2026-11-16' } });
+  await mockApi(page, (route) => route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify(body) }));
+  await page.goto('/#' + TOKEN);
+  const box = page.locator('[data-update]');
+  await expect(box).toHaveAttribute('data-update', 'office_hours');
+  await expect(box).toContainText('Latest email from the committee');
+  await expect(box).toContainText('Office hours invitation');
+  await expect(box).toContainText('Emailed 16 Nov 2026');
+  await expect(box.locator('a')).toHaveCount(0);
+  await shot(page, 'app-update', testInfo);
+
+  body = one({ update: { kind: 'resubmit', date: '2026-08-31' } });
+  await page.goto('/#' + TOKEN.slice(0, 21) + 'j');
+  await expect(page.locator('[data-update="resubmit"] a')).toHaveAttribute('href', 'https://canton.foundation/featured-app-request/');
+
+  const cases = [null, { kind: 'something_new', date: '2026-11-16' }, 'office_hours'];
+  for (let i = 0; i < cases.length; i++) {
+    body = one({ name: 'Harbor Swap', update: cases[i] });
+    await page.goto('/#' + TOKEN.slice(0, 20) + 'k' + i);  // a new token each time, so the page asks again
+    await expect(page.locator('main h1')).toHaveText('Harbor Swap');
+    await expect(page.locator('[data-update]')).toHaveCount(0);
+  }
+});
+
 test('testing action_needed shows "Action needed"', async ({ page }) => {
   await mockApi(page, one({ state: 'in_review', testing: 'action_needed', lock: { verified: null, amountMillions: null }, dvp: [] }));
   await page.goto('/#' + TOKEN);

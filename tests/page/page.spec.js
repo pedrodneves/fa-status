@@ -45,15 +45,14 @@ const three = () => ({
 async function mockApi(page, answer, opts) {
   const options = opts || {};
   const requests = [];
-  // The shipped config.js holds a placeholder deployment URL, which the page
-  // deliberately refuses to call. Tests serve a config with a real-looking one.
-  if (!options.keepConfig) {
-    await page.route('**/config.js', (route) => route.fulfill({
-      status: 200,
-      contentType: 'text/javascript',
-      body: "window.FA_STATUS_CONFIG = Object.freeze({ apiUrl: 'https://script.google.com/macros/s/TEST_DEPLOYMENT/exec', supportEmail: 'ops@canton.foundation', reapplyUrl: 'https://canton.foundation/featured-app-request/' });"
-    }));
-  }
+  // The real config.js points at the live deployment; tests always serve their
+  // own: a test deployment, or (opts.placeholder) the not-yet-deployed placeholder.
+  const deployment = options.placeholder ? 'REPLACE_WITH_DEPLOYMENT_ID' : 'TEST_DEPLOYMENT';
+  await page.route('**/config.js', (route) => route.fulfill({
+    status: 200,
+    contentType: 'text/javascript',
+    body: "window.FA_STATUS_CONFIG = Object.freeze({ apiUrl: 'https://script.google.com/macros/s/" + deployment + "/exec', supportEmail: 'ops@canton.foundation', reapplyUrl: 'https://canton.foundation/featured-app-request/' });"
+  }));
   await page.route(API, async (route, request) => {
     requests.push(request);
     if (options.delayMs) await new Promise((r) => setTimeout(r, options.delayMs));
@@ -140,7 +139,7 @@ test('the form: a failure or invalid_email keeps the form with a message, and it
 });
 
 test('the form makes no request while config.js still has the placeholder', async ({ page }) => {
-  const requests = await mockApi(page, { found: false }, { keepConfig: true });
+  const requests = await mockApi(page, { found: false }, { placeholder: true });
   await page.goto('/');
   await page.getByLabel('Email address').fill('alice@harbor.example');
   await page.getByRole('button', { name: 'Email me my link' }).click();
@@ -388,6 +387,63 @@ test('no horizontal scroll at 360px; dark mode has a dark background', async ({ 
     await expect(screen(page, 'start')).toBeVisible();
     await shot(page, 'start-dark', testInfo);
   }
+});
+
+test('theme: follows the system until the button is pressed, then remembers the choice', async ({ page }, testInfo) => {
+  await mockApi(page, one());
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.goto('/#' + TOKEN);
+  await expect(page.locator('main h1')).toHaveText('Harbor Swap');
+  const button = page.locator('[data-theme-toggle]');
+  const html = page.locator('html');
+  await expect(html).not.toHaveAttribute('data-theme', /./);
+  await expect(page.locator('.p-logo-light')).toBeVisible();
+  await expect(page.locator('.p-logo-dark')).toBeHidden();
+  await expect(button).toHaveAttribute('aria-label', 'Switch to dark theme');
+  const background = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  expect(await background()).toBe('rgb(255, 255, 252)');
+
+  await button.click();
+  await expect(html).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('.p-logo-dark')).toBeVisible();
+  await expect(page.locator('.p-logo-light')).toBeHidden();
+  await expect(button).toHaveAttribute('aria-label', 'Switch to white theme');
+  expect(await background()).toBe('rgb(24, 2, 49)');
+  if (testInfo.project.name === 'desktop') await shot(page, 'app-dark-picked', testInfo);
+
+  // The choice survives a reload, even with the system set to light.
+  await page.reload();
+  await expect(page.locator('main h1')).toHaveText('Harbor Swap');
+  await expect(html).toHaveAttribute('data-theme', 'dark');
+  expect(await background()).toBe('rgb(24, 2, 49)');
+
+  await button.click();
+  await expect(html).toHaveAttribute('data-theme', 'light');
+  expect(await background()).toBe('rgb(255, 255, 252)');
+});
+
+test('theme: a dark system setting gives the dark theme, the dark logo and a "white" button', async ({ page }) => {
+  await mockApi(page, { found: false });
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto('/');
+  await expect(screen(page, 'start')).toBeVisible();
+  await expect(page.locator('.p-logo-dark')).toBeVisible();
+  await expect(page.locator('.p-logo-light')).toBeHidden();
+  await expect(page.locator('[data-theme-toggle]')).toHaveAttribute('aria-label', 'Switch to white theme');
+  expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(24, 2, 49)');
+});
+
+test('brand: IBM Plex Sans is served by the site itself, the logo has a text alternative', async ({ page }) => {
+  const fontRequests = [];
+  page.on('request', (r) => { if (r.resourceType() === 'font') fontRequests.push(r.url()); });
+  await mockApi(page, { found: false });
+  await page.goto('/');
+  await expect(screen(page, 'start')).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  expect(await page.evaluate(() => document.fonts.check('16px "IBM Plex Sans"'))).toBe(true);
+  expect(fontRequests.length).toBeGreaterThan(0);
+  fontRequests.forEach((url) => expect(url).toMatch(/^http:\/\/localhost:4173\/fonts\//));
+  await expect(page.getByRole('img', { name: 'Canton Foundation' })).toHaveCount(1);
 });
 
 test('unknown paths get the 404 page', async ({ page }) => {

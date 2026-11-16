@@ -72,6 +72,12 @@
     siteName: 'Featured App Status',  // browser tab title: "<name> · Featured App Status"
     separator: ' · ',                 // joins the parts of meta lines and titles
 
+    // The theme button in the header (its accessible name and tooltip).
+    theme: {
+      toDark: 'Switch to dark theme',
+      toLight: 'Switch to white theme'
+    },
+
     // ---- Start page and the email form --------------------------------------
     start: {
       heading: 'Check your application status',
@@ -1330,7 +1336,56 @@
   }
 
   // ===========================================================================
-  // 11. Start
+  // 11. White / dark theme
+  // ===========================================================================
+  //
+  // The page follows the system setting until the visitor presses the theme
+  // button. Their choice is kept in localStorage under THEME_KEY, and
+  // theme.js applies it on the next visit before the page paints. Storage can
+  // be unavailable; the button then still works for the current page.
+
+  const THEME_KEY = 'fa-status-theme';  // the same key as in theme.js
+  const themeButton = document.querySelector('[data-theme-toggle]');
+  const darkQuery = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+
+  /** The theme on screen now: the visitor's pick, or else the system's. */
+  function currentTheme() {
+    const picked = document.documentElement.getAttribute('data-theme');
+    if (picked === 'light' || picked === 'dark') return picked;
+    return darkQuery && darkQuery.matches ? 'dark' : 'light';
+  }
+
+  /** Names the button after what pressing it does. */
+  function labelThemeButton() {
+    if (!themeButton) return;
+    const label = currentTheme() === 'dark' ? TEXT.theme.toLight : TEXT.theme.toDark;
+    themeButton.setAttribute('aria-label', label);
+    themeButton.setAttribute('title', label);
+  }
+
+  /** Switches to the other theme and remembers the choice. */
+  function toggleTheme() {
+    const next = currentTheme() === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try {
+      window.localStorage.setItem(THEME_KEY, next);
+    } catch (err) {
+      // No storage: the choice lasts until the page is closed.
+    }
+    labelThemeButton();
+  }
+
+  if (themeButton) {
+    themeButton.addEventListener('click', toggleTheme);
+    labelThemeButton();
+    // While the visitor hasn't picked, a system change flips the theme: keep the label right.
+    if (darkQuery && typeof darkQuery.addEventListener === 'function') {
+      darkQuery.addEventListener('change', labelThemeButton);
+    }
+  }
+
+  // ===========================================================================
+  // 12. Start
   // ===========================================================================
 
   // Pure functions only, for the page tests.

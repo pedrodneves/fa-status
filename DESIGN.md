@@ -185,10 +185,16 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
 
 **Screens** (`main[data-screen]`): `start`, `sent`, `loading`, `list`, `app`, `dvp`, `invalid` (with the form), `error` (with retry).
 
+**Look:**
+- Canton Foundation website colours (option A of the theme mockup): Canton black `#030206`, white `#FFFFFC`, deep purple `#180231`, yellow `#F3FF97` buttons, purple `#634BA9` and lilac `#D5A5E3` accents.
+- The official logo, `cf-logo-light.svg` / `cf-logo-dark.svg`. The favicon is the C mark from the same file.
+- IBM Plex Sans and Mono, served from `docs/fonts/` (SIL Open Font License).
+- A white and a dark theme. The page follows the system setting until the visitor presses the header button. The choice is kept in `localStorage` and applied by `theme.js` before the page paints.
+
 **Safety:**
 - DOM built with `textContent` only.
 - https-only links, opened with `rel="noopener noreferrer"`.
-- CSP limits network calls to `script.google.com` / `script.googleusercontent.com`.
+- CSP limits network calls to `script.google.com` / `script.googleusercontent.com`; scripts, styles, fonts and images come from the site only.
 - `noindex` and `no-referrer`.
 - A malformed token never leaves the browser.
 

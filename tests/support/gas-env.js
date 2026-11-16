@@ -11,9 +11,10 @@
  *   env.cache.dump();                    // what the script cached
  *   env.requests;                        // every UrlFetchApp request, parsed
  *   env.logs;                            // everything console.log/error printed
+ *   env.mail.sent;                       // every MailApp.sendEmail call (nothing is sent)
  *
- * The same environment drives the sandbox runner (tests/sandbox), which passes
- * a fetch handler that really calls Monday.
+ * The same environment drives the live check (tests/live), which passes a
+ * fetch handler that really calls Monday (read-only).
  */
 const fs = require('fs');
 const path = require('path');
@@ -39,7 +40,9 @@ function createGasEnv(opts) {
     triggers: [],
     lockAvailable: true,
     lockAcquisitions: 0,
-    lockReleases: 0
+    lockReleases: 0,
+    // MailApp stand-in: records messages, never sends anything.
+    mail: { sent: [], remainingQuota: 100, failNext: false }
   };
 
   // ---------------------------------------------------------------- PropertiesService
@@ -109,13 +112,28 @@ function createGasEnv(opts) {
     }
   };
 
+  // ---------------------------------------------------------------- MailApp
+  const MailApp = {
+    getRemainingDailyQuota: () => env.mail.remainingQuota,
+    sendEmail: (message) => {
+      if (env.mail.failNext) {
+        env.mail.failNext = false;
+        throw new Error('Invalid email: ' + message.to); // like Apps Script, the message quotes the address
+      }
+      env.mail.sent.push(message);
+      env.mail.remainingQuota--;
+    }
+  };
+
   // ---------------------------------------------------------------- Utilities
+  // Java returns signed bytes (-128..127); mimic that exactly.
+  const signed = (buffer) => Array.from(buffer, (b) => (b > 127 ? b - 256 : b));
   const Utilities = {
     DigestAlgorithm: { SHA_256: 'SHA_256' },
     Charset: { UTF_8: 'UTF_8' },
     getUuid: () => crypto.randomUUID(),
-    // Java returns signed bytes (-128..127); mimic that exactly.
-    computeDigest: (algorithm, value) => Array.from(crypto.createHash('sha256').update(String(value), 'utf8').digest(), (b) => (b > 127 ? b - 256 : b)),
+    computeDigest: (algorithm, value) => signed(crypto.createHash('sha256').update(String(value), 'utf8').digest()),
+    computeHmacSha256Signature: (value, key) => signed(crypto.createHmac('sha256', Buffer.from(String(key), 'utf8')).update(String(value), 'utf8').digest()),
     base64Encode: (bytes) => Buffer.from(bytes.map((b) => b & 255)).toString('base64'),
     // Apps Script's web-safe variant keeps the "=" padding.
     base64EncodeWebSafe: (bytes) => Buffer.from(bytes.map((b) => b & 255)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_'),
@@ -166,6 +184,7 @@ function createGasEnv(opts) {
     CacheService: { getScriptCache: () => scriptCache },
     LockService: { getScriptLock: () => scriptLock },
     UrlFetchApp: UrlFetchApp,
+    MailApp: MailApp,
     Utilities: Utilities,
     ContentService: ContentService,
     ScriptApp: ScriptApp,
@@ -180,11 +199,19 @@ function createGasEnv(opts) {
   };
   /** Evaluates an expression inside the script (e.g. a const). */
   env.eval = (expr) => vm.runInContext(expr, context);
-  /** Convenience: doGet for a code, parsed. */
-  env.get = (code) => {
-    const out = env.call('doGet', code === undefined ? undefined : { parameter: { link: code } });
+  /** Convenience: doGet for a token, parsed. */
+  env.get = (token) => {
+    const out = env.call('doGet', token === undefined ? undefined : { parameter: { link: token } });
     return { body: JSON.parse(out.getContent()), mimeType: out.getMimeType() };
   };
+  /** Convenience: doPost with a JSON body like the page sends ({email}), parsed. */
+  env.post = (body) => {
+    const contents = typeof body === 'string' ? body : JSON.stringify(body);
+    const out = env.call('doPost', { parameter: {}, postData: { contents: contents, type: 'text/plain' } });
+    return { body: JSON.parse(out.getContent()), mimeType: out.getMimeType() };
+  };
+  /** The token Code.gs would give an address (uses LINK_SECRET from the props). */
+  env.tokenFor = (email) => env.call('tokenFor_', env.props.LINK_SECRET, String(email).trim().toLowerCase());
   env.logText = () => env.logs.map((l) => l.text).join('\n');
   return env;
 }

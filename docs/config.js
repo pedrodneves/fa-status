@@ -8,16 +8,18 @@
 window.FA_STATUS_CONFIG = Object.freeze({
   /*
    * The Google Apps Script web app's /exec URL (Deploy > Manage deployments >
-   * Web app URL). The page calls it as `<apiUrl>?link=<code>` with a plain GET.
-   * While it still contains REPLACE_WITH_DEPLOYMENT_ID the page makes no
-   * request: it shows the "couldn't load" screen and logs a console warning.
+   * Web app URL). The page calls it as `<apiUrl>?link=<token>` with a plain
+   * GET, and POSTs the email form to it. While it still contains
+   * REPLACE_WITH_DEPLOYMENT_ID the page makes no request: links show the
+   * "couldn't load" screen, the form says it couldn't send, and the console
+   * shows a warning.
    * It must stay on https://script.google.com, the only API host the page's
    * Content-Security-Policy (connect-src in index.html) allows.
    */
   apiUrl: 'https://script.google.com/macros/s/REPLACE_WITH_DEPLOYMENT_ID/exec',
 
   /*
-   * Where applicants write to the Featured App team: lost or leaked links,
+   * Where applicants write to the Featured App team: no email arriving,
    * questions about a decision, or a page that won't load. Shown as a
    * mailto: link on every screen.
    */

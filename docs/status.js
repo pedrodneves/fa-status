@@ -1,36 +1,48 @@
 /*
  * Featured App Status: status.js
  *
- * The page is one static file, the same for everyone. What makes it private
- * is the code after "#" in the link, which browsers never send to GitHub
- * Pages. This script:
+ * The page is one static file, the same for everyone. What makes a status
+ * page private is the token after "#" in the link, which browsers never send
+ * to GitHub Pages. Applicants get that link by email: they type the address
+ * they applied with, and Apps Script emails it the link (only if the address
+ * is on an application). This script:
  *
- *   1. reads the route from location.hash: "#<code>" or "#<code>/dvp-<id>";
- *   2. asks the Apps Script web app for that one application with a plain GET
- *      (no custom headers, so the browser makes no CORS preflight);
+ *   1. reads the route from location.hash:
+ *        ""                                  the start page (email form)
+ *        "#<token>"                          the applications of that address
+ *        "#<token>/app-<id>"                 one application
+ *        "#<token>/app-<id>/dvp-<id>"        one DVP request ("/app-<id>" optional)
+ *   2. asks the Apps Script web app for that token's applications with a
+ *      plain GET, or sends the email form with a POST (text/plain body, no
+ *      custom headers, so the browser makes no CORS preflight);
  *   3. renders one screen into <main>, marked with a data-screen attribute:
- *        no-code   the URL has no "#..."
+ *        start     the email form
+ *        sent      "check your email"
  *        loading   waiting for Apps Script (usually 1-2 s)
- *        app       the application page
- *        dvp       one DVP request of that application
- *        invalid   malformed code, or Apps Script answered { found: false }
+ *        list      several applications: one card each
+ *        app       one application (straight away when there is only one)
+ *        dvp       one DVP request of an application
+ *        invalid   malformed token, or Apps Script answered { found: false };
+ *                  shows the email form again
  *        error     network error, timeout, unusable answer, or config.js
  *                  still has the placeholder apiUrl
  *
  * Answer shapes (see "Response contract" in DESIGN.md):
- *   { found: true, app: { name, institution, type, submitted, state, lock,
- *                         testing, partyId, website, announcement, updated,
- *                         dvp: [{ id, name, state, submitted, finalApproval,
- *                                 requestUrl, requestRef, updated }] } }
- *   { found: false }
- *   { error: "unavailable" }
+ *   GET  { found: true, apps: [{ id, name, institution, type, submitted, state,
+ *                                lock, testing, partyId, website, announcement,
+ *                                updated, dvp: [{ id, name, state, submitted,
+ *                                finalApproval, requestUrl, requestRef, updated }] }] }
+ *        { found: false }
+ *        { error: "unavailable" }
+ *   POST { ok: true }  (the same whether or not the address applied)
+ *        { ok: false, error: "invalid_email" | "unavailable" }
  *
  * Safety rules followed throughout:
  *   - Every node is built with createElement + textContent. Nothing from the
  *     API or the URL is ever parsed as HTML.
  *   - Links to other sites are made only for https:// URLs, and they open in
  *     a new tab with rel="noopener noreferrer".
- *   - Codes are never logged.
+ *   - Tokens and email addresses are never logged or stored.
  *
  * No dependencies. Test hook: window.FAStatus = { parseRoute, formatDate }.
  */
@@ -60,15 +72,30 @@
     siteName: 'Featured App Status',  // browser tab title: "<name> · Featured App Status"
     separator: ' · ',                 // joins the parts of meta lines and titles
 
-    // ---- Screens without application data ----------------------------------
-    loading: 'Loading your application…',
-    noCode: {
-      heading: 'Open your status link',
-      body: 'This page shows where a Featured App application stands. Open it with the private link from your email. Lost it? Ask the Featured App team at {email}.'
+    // ---- Start page and the email form --------------------------------------
+    start: {
+      heading: 'Check your application status',
+      body: "Enter the email address on your Featured App application. We'll email you a private link to the status of your applications and DVP requests.",
+      label: 'Email address',
+      placeholder: 'name@company.com',
+      button: 'Email me my link',
+      sending: 'Sending…',
+      invalid: 'Enter one email address, like name@company.com.',
+      failed: "We couldn't send your link just now. Please try again in a minute.",
+      fine: 'We only email addresses that are on a Featured App application. Questions? Contact the Featured App team at {email}.'
     },
+    sent: {
+      heading: 'Check your email',
+      body: "If {address} is on a Featured App application, we've sent it a link. It can take a few minutes, so check your spam folder too.",
+      noEmail: "Nothing after 15 minutes? That address may not be on an application: try another one you applied with, or contact the Featured App team at {email}.",
+      again: 'Use a different email'
+    },
+
+    // ---- Screens without application data ----------------------------------
+    loading: 'Loading your applications…',
     invalid: {
       heading: "This link isn't valid",
-      body: "It may have been replaced with a new one, or only part of it was copied. Ask the Featured App team for your application's current link at {email}."
+      body: 'Only part of it may have been copied. Enter your email address to get your link again.'
     },
     error: {
       heading: "We couldn't load your status",
@@ -80,7 +107,7 @@
     submitted: 'Submitted {date}',
     lastUpdated: 'Last updated {date}',
     contact: 'Questions? Contact the Featured App team at {email}.',
-    footer: 'This page is private to this application. Anyone with the link can see it, so share it only within your team. Lost the link, or shared it by mistake? Ask the Featured App team for a new one at {email}.',
+    footer: 'This page is private to your email address. Anyone with the link can see these applications, so share it only within your team. Questions? Contact the Featured App team at {email}.',
     statusLabel: 'Status',  // accessible name of the status box
     // Read by screen readers before each timeline step (the dots are visual only).
     stepState: {
@@ -88,6 +115,15 @@
       current: 'Current step',
       todo: 'Upcoming',
       stop: 'Outcome'
+    },
+
+    // ---- List of applications (when an address has more than one) ----------
+    list: {
+      heading: 'Your applications',
+      intro: 'Featured App applications that list your email address. Select one to see its progress and DVP requests.',
+      dvpOne: '1 DVP request',
+      dvpMany: '{count} DVP requests',
+      back: '← All your applications'
     },
 
     // ---- Application page ---------------------------------------------------
@@ -251,9 +287,9 @@
   // config.js ships with this placeholder until the web app is deployed.
   const API_PLACEHOLDER = 'REPLACE_WITH_DEPLOYMENT_ID';
 
-  // "<code>" or "<code>/dvp-<id>": a 22-character base64url code, then an
-  // optional DVP request id (a Monday item id, digits only).
-  const ROUTE_PATTERN = /^([A-Za-z0-9_-]{22})(?:\/dvp-(\d+))?$/;
+  // "<token>", then an optional application id and an optional DVP request
+  // id (Monday item ids, digits only): "<token>/app-<id>/dvp-<id>".
+  const ROUTE_PATTERN = /^([A-Za-z0-9_-]{22})(?:\/app-(\d+))?(?:\/dvp-(\d+))?$/;
 
   // Characters a sentence or an email client may glue onto the end of a
   // pasted link, e.g. "...#k7Qm2xV9pLr4TzN8wYc3Ef." or "(...#k7Qm...)".
@@ -262,6 +298,9 @@
 
   // A plausible single email address (no spaces, quotes, brackets or commas).
   const EMAIL_PATTERN = /^[^\s@<>()[\]"',;:\\]+@[^\s@<>()[\]"',;:\\]+\.[^\s@<>()[\]"',;:\\]+$/;
+
+  // What the email form accepts: the same rule as the backend's EMAIL_INPUT_RE.
+  const ADDRESS_PATTERN = /^[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 
   // "14 Oct 2026". Dates are calendar days, so format them in UTC.
   const DATE_FORMAT = new Intl.DateTimeFormat('en-GB', {
@@ -279,28 +318,29 @@
   const FA_GRANTED = ['approved', 'revoked'];
 
   // Screens that use the narrow, centred column.
-  const NARROW_SCREENS = ['no-code', 'loading', 'invalid', 'error'];
+  const NARROW_SCREENS = ['start', 'sent', 'loading', 'invalid', 'error'];
 
   // Screens that show the "Private link" badge in the header.
-  const PRIVATE_SCREENS = ['app', 'dvp'];
+  const PRIVATE_SCREENS = ['list', 'app', 'dvp'];
 
   // ===========================================================================
   // 3. Page state
   // ===========================================================================
   //
-  // The last good answer stays in memory, so moving between an application
-  // and its DVP requests (same code) re-renders without asking again. Each
-  // request gets a number; an answer whose number is no longer
+  // The last good answer stays in memory, so moving between the list, an
+  // application and its DVP requests (same token) re-renders without asking
+  // again. Each request gets a number; an answer whose number is no longer
   // `session.pending` is stale (the visitor moved on) and is ignored.
   const session = {
-    code: null,        // code of `answer`, or of the request in flight
-    answer: null,      // { found: true, app } or { found: false }; null if none yet
+    code: null,        // token of `answer`, or of the request in flight
+    answer: null,      // { found: true, apps } or { found: false }; null if none yet
     pending: 0,        // number of the request in flight; 0 when idle
     controller: null,  // AbortController of the request in flight
     timer: 0           // its timeout
   };
   let requestCount = 0;
   let warnedAboutConfig = false;
+  let sending = false;  // the email form is waiting for Apps Script
 
   const main = document.querySelector('main');
   const privateBadge = document.querySelector('[data-private-link]');
@@ -312,13 +352,14 @@
   /**
    * Reads a location.hash value and says what it asks for.
    *
-   *   parseRoute('')                                  -> { kind: 'none',    code: null, dvpId: null }
-   *   parseRoute('#k7Qm2xV9pLr4TzN8wYc3Ef')           -> { kind: 'code',    code: 'k7Qm2xV9pLr4TzN8wYc3Ef', dvpId: null }
-   *   parseRoute('#k7Qm2xV9pLr4TzN8wYc3Ef/dvp-147).') -> { kind: 'code',    code: 'k7Qm2xV9pLr4TzN8wYc3Ef', dvpId: '147' }
-   *   parseRoute('#k7Qm2x')                           -> { kind: 'invalid', code: null, dvpId: null }
+   *   parseRoute('')                                -> { kind: 'none', code: null, appId: null, dvpId: null }
+   *   parseRoute('#k7Qm2xV9pLr4TzN8wYc3Ef')         -> { kind: 'code', code: 'k7Qm…', appId: null, dvpId: null }
+   *   parseRoute('#k7Qm2xV9pLr4TzN8wYc3Ef/app-12')  -> { kind: 'code', code: 'k7Qm…', appId: '12', dvpId: null }
+   *   parseRoute('#k7Qm…/app-12/dvp-147).')         -> { kind: 'code', code: 'k7Qm…', appId: '12', dvpId: '147' }
+   *   parseRoute('#k7Qm2x')                         -> { kind: 'invalid', code: null, appId: null, dvpId: null }
    *
    * The leading "#" is optional, and trailing punctuation pasted from an
-   * email is ignored. dvpId is a string of digits, or null.
+   * email is ignored. appId and dvpId are strings of digits, or null.
    */
   function parseRoute(hash) {
     let value = typeof hash === 'string' ? hash : '';
@@ -333,10 +374,10 @@
     }
     value = value.trim().replace(TRAILING_PUNCTUATION, '');
 
-    if (value === '') return { kind: 'none', code: null, dvpId: null };
+    if (value === '') return { kind: 'none', code: null, appId: null, dvpId: null };
     const match = ROUTE_PATTERN.exec(value);
-    if (!match) return { kind: 'invalid', code: null, dvpId: null };
-    return { kind: 'code', code: match[1], dvpId: match[2] || null };
+    if (!match) return { kind: 'invalid', code: null, appId: null, dvpId: null };
+    return { kind: 'code', code: match[1], appId: match[2] || null, dvpId: match[3] || null };
   }
 
   /**
@@ -412,19 +453,50 @@
     return hasOwn(TEXT.fa.testing, key) ? key : 'in_progress';
   }
 
-  /** A DVP request's id as a string of digits, or "" if it has no usable id. */
-  function dvpIdOf(request) {
-    const id = textOf(request.id);
+  /** An item's id (application or DVP request) as a string of digits, or "" if it has none. */
+  function idOf(item) {
+    const id = textOf(item.id);
     return /^\d+$/.test(id) ? id : '';
   }
 
-  /** The DVP request with this id in the app's list, or null. */
-  function findDvp(app, id) {
-    const list = Array.isArray(app.dvp) ? app.dvp : [];
-    for (let i = 0; i < list.length; i += 1) {
-      if (isObject(list[i]) && dvpIdOf(list[i]) === id) return list[i];
+  /** The application with this id, or null. */
+  function findApp(apps, id) {
+    for (let i = 0; i < apps.length; i += 1) {
+      if (idOf(apps[i]) === id) return apps[i];
     }
     return null;
+  }
+
+  /** The DVP requests of an application (objects only). */
+  function dvpOf(app) {
+    return Array.isArray(app.dvp) ? app.dvp.filter(isObject) : [];
+  }
+
+  /**
+   * The DVP request with this id, preferably inside `preferred` (the app in
+   * the URL); otherwise the first app that has it. Returns { app, request }
+   * or null.
+   */
+  function findDvp(apps, preferred, id) {
+    const order = preferred ? [preferred].concat(apps) : apps;
+    for (let i = 0; i < order.length; i += 1) {
+      const list = dvpOf(order[i]);
+      for (let j = 0; j < list.length; j += 1) {
+        if (idOf(list[j]) === id) return { app: order[i], request: list[j] };
+      }
+    }
+    return null;
+  }
+
+  /** The page of one application: "#<token>" when it is the only one, else "#<token>/app-<id>". */
+  function appHref(code, apps, app) {
+    const id = idOf(app);
+    return apps.length > 1 && id ? '#' + code + '/app-' + id : '#' + code;
+  }
+
+  /** The page of one DVP request, reached from `app`. */
+  function dvpHref(code, apps, app, request) {
+    return appHref(code, apps, app) + '/dvp-' + idOf(request);
   }
 
   /** The value as a parsed URL if it is a valid https:// URL, otherwise null. */
@@ -745,29 +817,54 @@
     }
   }
 
-  /** A screen with a heading and one paragraph (no-code, invalid, error). */
-  function showMessage(screen, words, extra) {
-    show(screen, null, [
-      el('div', { class: 'd-head' }, [
-        el('h1', { class: 'p-h', tabindex: '-1', text: words.heading }),
-        el('p', { class: 'p-sub' }, fill(words.body, { email: emailLink() }))
-      ]),
-      extra
+  /** A heading and one paragraph (the top of start, invalid and error screens). */
+  function messageHead(heading, body) {
+    return el('div', { class: 'd-head' }, [
+      el('h1', { class: 'p-h', tabindex: '-1', text: heading }),
+      el('p', { class: 'p-sub' }, body)
     ]);
   }
 
-  function showNoCode() {
-    showMessage('no-code', TEXT.noCode);
+  /** The start page: what this is, and the email form. */
+  function showStart(prefill) {
+    show('start', null, [
+      messageHead(TEXT.start.heading, TEXT.start.body),
+      emailForm(prefill),
+      el('p', { class: 'p-fine' }, fill(TEXT.start.fine, { email: emailLink() }))
+    ]);
   }
 
+  /** After the form: "check your email". The answer never says whether the address applied. */
+  function showSent(address) {
+    // A bad token in the URL has done its job; drop it so a reload shows the start page.
+    if (window.location.hash && window.history && window.history.replaceState) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+    const again = el('button', { class: 'p-btn secondary', type: 'button', 'data-action': 'again', text: TEXT.sent.again });
+    again.addEventListener('click', function () { showStart(''); });
+    show('sent', null, [
+      messageHead(TEXT.sent.heading, fill(TEXT.sent.body, { address: el('strong', { class: 'address', text: address }) })),
+      el('p', { class: 'p-fine' }, fill(TEXT.sent.noEmail, { email: emailLink() })),
+      again
+    ]);
+  }
+
+  /** A link that doesn't work: say so, and offer the email form. */
   function showInvalid() {
-    showMessage('invalid', TEXT.invalid);
+    show('invalid', null, [
+      messageHead(TEXT.invalid.heading, TEXT.invalid.body),
+      emailForm(''),
+      el('p', { class: 'p-fine' }, fill(TEXT.start.fine, { email: emailLink() }))
+    ]);
   }
 
   function showError() {
     const retry = el('button', { class: 'p-btn', type: 'button', 'data-action': 'retry', text: TEXT.error.retry });
     retry.addEventListener('click', retryRequest);
-    showMessage('error', TEXT.error, retry);
+    show('error', null, [
+      messageHead(TEXT.error.heading, fill(TEXT.error.body, { email: emailLink() })),
+      retry
+    ]);
   }
 
   function showLoading() {
@@ -777,13 +874,45 @@
     ]));
   }
 
-  /** The application page (mockup screen 2). */
-  function showApp(code, app) {
+  /** Several applications: one card each, newest first (the backend's order). */
+  function showList(code, apps) {
+    const cards = apps.map(function (app) {
+      const state = normalizeState(app.state, TEXT.fa.states, 'in_review');
+      const words = TEXT.fa.states[state];
+      const count = dvpOf(app).length;
+      const meta = joinParts([
+        textOf(app.institution),
+        submittedText(app.submitted),
+        count === 1 ? TEXT.list.dvpOne : count > 1 ? fillText(TEXT.list.dvpMany, { count: String(count) }) : ''
+      ]);
+      // The spaces keep the card's text (and so the link's accessible name) readable.
+      const content = [
+        el('span', { class: 'app-name', text: textOf(app.name) || TEXT.fa.untitled }),
+        ' ',
+        pill(words.label, words.tone, state),
+        meta ? [' ', el('span', { class: 'app-meta', text: meta })] : null
+      ];
+      const id = idOf(app);
+      const card = id
+        ? el('a', { class: 'app', href: '#' + code + '/app-' + id, 'data-app-id': id }, content)
+        : el('div', { class: 'app' }, content);
+      return el('li', null, card);
+    });
+    show('list', TEXT.list.heading, [
+      pageHead(null, TEXT.list.heading, TEXT.list.intro),
+      el('ul', { class: 'app-list' }, cards),
+      footerNote()
+    ]);
+  }
+
+  /** The application page. With several applications, a link leads back to the list. */
+  function showApp(code, apps, app) {
     const state = normalizeState(app.state, TEXT.fa.states, 'in_review');
     const words = TEXT.fa.states[state];
     const name = textOf(app.name) || TEXT.fa.untitled;
 
     show('app', name, [
+      apps.length > 1 ? el('a', { class: 'back', href: '#' + code, text: TEXT.list.back }) : null,
       pageHead(TEXT.fa.eyebrow, name, joinParts([
         textOf(app.institution),
         textOf(app.type),
@@ -792,7 +921,7 @@
       statusBox(state, words, faStatusExtra(app, state, words), app.updated),
       timeline(TEXT.fa.progressLabel, faSteps(app, state)),
       onFileSection(app),
-      dvpListSection(code, app.dvp),
+      dvpListSection(code, apps, app),
       footerNote()
     ]);
   }
@@ -831,8 +960,8 @@
   }
 
   /** "DVP requests for this app": one card per request; null when there are none. */
-  function dvpListSection(code, list) {
-    const requests = Array.isArray(list) ? list.filter(isObject) : [];
+  function dvpListSection(code, apps, app) {
+    const requests = dvpOf(app);
     if (requests.length === 0) return null;
 
     const cards = requests.map(function (request) {
@@ -849,18 +978,19 @@
         submitted ? [' ', el('span', { class: 'app-meta', text: submitted })] : null
       ];
       // A card links to the request's page when the request has a usable id.
-      const id = dvpIdOf(request);
+      const id = idOf(request);
       const card = id
-        ? el('a', { class: 'app', href: '#' + code + '/dvp-' + id, 'data-dvp-id': id }, content)
+        ? el('a', { class: 'app', href: dvpHref(code, apps, app, request), 'data-dvp-id': id }, content)
         : el('div', { class: 'app' }, content);
       return el('li', null, card);
     });
     return section('dvp', TEXT.fa.dvpHeading, el('ul', { class: 'app-list' }, cards));
   }
 
-  /** A DVP request's page (mockup screen 4). */
-  function showDvp(code, app, request) {
+  /** A DVP request's page. */
+  function showDvp(code, apps, app, request) {
     const appName = textOf(app.name) || TEXT.fa.untitled;
+    const appLink = appHref(code, apps, app);
     const state = normalizeState(request.state, TEXT.dvp.states, 'in_review');
     const words = TEXT.dvp.states[state];
     const name = textOf(request.name) || TEXT.dvp.untitled;
@@ -871,14 +1001,14 @@
       : TEXT.dvp.eyebrow;
 
     // "For Featured App <app name> · Submitted <date>", the app name linking back.
-    const meta = fill(TEXT.dvp.forApp, { name: el('a', { href: '#' + code, text: appName }) });
+    const meta = fill(TEXT.dvp.forApp, { name: el('a', { href: appLink, text: appName }) });
     const submitted = submittedText(request.submitted);
     if (submitted) meta.push(TEXT.separator, submitted);
 
     show('dvp', name, [
       el('a', {
         class: 'back',
-        href: '#' + code,
+        href: appLink,
         'aria-label': fillText(TEXT.dvp.backLabel, { name: appName }),
         text: fillText(TEXT.dvp.back, { name: appName })
       }),
@@ -901,17 +1031,25 @@
     ]));
   }
 
-  /** Renders a good answer for the current route. */
+  /**
+   * Renders a good answer for the current route:
+   *   a DVP id   -> that request (inside the app in the URL, if any)
+   *   an app id  -> that application
+   *   neither    -> the only application, or the list
+   * Unknown ids fall back to the application, then to the list.
+   */
   function showAnswer(route, answer) {
     try {
       if (!answer.found) {
         showInvalid();
         return;
       }
-      // An unknown DVP id falls back to the application page.
-      const request = route.dvpId ? findDvp(answer.app, route.dvpId) : null;
-      if (request) showDvp(route.code, answer.app, request);
-      else showApp(route.code, answer.app);
+      const apps = answer.apps;
+      const app = route.appId ? findApp(apps, route.appId) : (apps.length === 1 ? apps[0] : null);
+      const hit = route.dvpId ? findDvp(apps, app, route.dvpId) : null;
+      if (hit) showDvp(route.code, apps, hit.app, hit.request);
+      else if (app) showApp(route.code, apps, app);
+      else showList(route.code, apps);
     } catch (err) {
       // An unexpected answer must never leave the page blank. No details are
       // logged, since they could include application data.
@@ -921,7 +1059,134 @@
   }
 
   // ===========================================================================
-  // 8. Talking to Apps Script
+  // 8. The email form
+  // ===========================================================================
+
+  /**
+   * The "email me my link" form. Submitting checks the address, then sends
+   * it to Apps Script (see requestLink). `prefill` is an address to start
+   * with, or "".
+   */
+  function emailForm(prefill) {
+    const input = el('input', {
+      id: 'email',
+      class: 'field',
+      type: 'email',
+      name: 'email',
+      autocomplete: 'email',
+      inputmode: 'email',
+      autocapitalize: 'off',
+      spellcheck: 'false',
+      maxlength: '254',
+      placeholder: TEXT.start.placeholder,
+      'aria-describedby': 'email-message'
+    });
+    if (prefill) input.value = prefill;
+    const button = el('button', { class: 'p-btn', type: 'submit', text: TEXT.start.button });
+    const message = el('p', { id: 'email-message', class: 'form-message', 'aria-live': 'polite' });
+    const form = el('form', { class: 'email-form', 'data-form': 'email', novalidate: true }, [
+      el('label', { class: 'field-label', for: 'email', text: TEXT.start.label }),
+      el('div', { class: 'field-row' }, [input, button]),
+      message
+    ]);
+
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();  // never a native form submission (the CSP forbids it anyway)
+      const address = input.value.trim();
+      if (!ADDRESS_PATTERN.test(address)) {
+        setFormMessage(form, TEXT.start.invalid);
+        input.focus();
+        return;
+      }
+      requestLink(form, address);
+    });
+    return form;
+  }
+
+  /** Shows (or clears, with "") the message under the form, and marks the field. */
+  function setFormMessage(form, text) {
+    const message = form.querySelector('.form-message');
+    const input = form.querySelector('input');
+    message.textContent = text;
+    if (text) input.setAttribute('aria-invalid', 'true');
+    else input.removeAttribute('aria-invalid');
+  }
+
+  /**
+   * Sends the address to Apps Script: POST with a text/plain JSON body, so
+   * the browser makes no CORS preflight. Shows "check your email" on
+   * { ok: true }, and a message under the form for anything else.
+   */
+  function requestLink(form, address) {
+    if (sending) return;
+    const button = form.querySelector('button');
+    const apiUrl = configuredApiUrl();
+    if (!apiUrl) {
+      setFormMessage(form, TEXT.start.failed);
+      return;
+    }
+
+    sending = true;
+    button.disabled = true;
+    button.textContent = TEXT.start.sending;
+    setFormMessage(form, '');
+
+    let done = false;
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = window.setTimeout(function () {
+      finishSend(null);
+      if (controller) controller.abort();
+    }, REQUEST_TIMEOUT_MS);
+
+    // result: 'ok', 'invalid', or null for any failure.
+    function finishSend(result) {
+      if (done) return;
+      done = true;
+      sending = false;
+      window.clearTimeout(timer);
+      if (!form.isConnected) return;  // the visitor already moved on
+      if (result === 'ok') {
+        showSent(address);
+        return;
+      }
+      button.disabled = false;
+      button.textContent = TEXT.start.button;
+      setFormMessage(form, result === 'invalid' ? TEXT.start.invalid : TEXT.start.failed);
+    }
+
+    const options = {
+      method: 'POST',
+      body: JSON.stringify({ email: address }),  // a string body is sent as text/plain
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+      redirect: 'follow'
+    };
+    if (controller) options.signal = controller.signal;
+
+    let request;
+    try {
+      request = window.fetch(apiUrl, options);
+    } catch (err) {
+      finishSend(null);
+      return;
+    }
+    request
+      .then(function (response) {
+        if (!response.ok) throw new Error('Unexpected HTTP status');
+        return response.json();
+      })
+      .then(
+        function (body) {
+          if (isObject(body) && body.ok === true) finishSend('ok');
+          else if (isObject(body) && body.error === 'invalid_email') finishSend('invalid');
+          else finishSend(null);
+        },
+        function () { finishSend(null); }
+      );
+  }
+
+  // ===========================================================================
+  // 9. Loading a link's applications
   // ===========================================================================
 
   /** The /exec URL from config.js, or "" (with one console warning) if it isn't set up. */
@@ -939,7 +1204,10 @@
   /** Reads the JSON body: a good answer, or null for anything unusable. */
   function readAnswer(body) {
     if (!isObject(body) || body.error) return null;
-    if (body.found === true && isObject(body.app)) return { found: true, app: body.app };
+    if (body.found === true && Array.isArray(body.apps)) {
+      const apps = body.apps.filter(isObject);
+      return apps.length ? { found: true, apps: apps } : { found: false };
+    }
     if (body.found === false) return { found: false };
     return null;
   }
@@ -1018,14 +1286,14 @@
     session.answer = answer;  // stays null after a failure, so the next visit asks again
 
     // hashchange fires a moment after the URL changes, so check that the URL
-    // still asks for this code; if not, the pending hashchange takes over.
+    // still asks for this token; if not, the pending hashchange takes over.
     const route = parseRoute(window.location.hash);
     if (route.kind !== 'code' || route.code !== session.code) return;
     if (answer) showAnswer(route, answer);
     else showError();
   }
 
-  /** "Try again" on the error screen: ask again for the code in the URL. */
+  /** "Try again" on the error screen: ask again for the token in the URL. */
   function retryRequest() {
     const route = parseRoute(window.location.hash);
     if (route.kind === 'code') load(route.code);
@@ -1033,7 +1301,7 @@
   }
 
   // ===========================================================================
-  // 9. Routing
+  // 10. Routing
   // ===========================================================================
 
   /** Shows whatever the current URL asks for. Runs on load and on every hashchange. */
@@ -1041,16 +1309,16 @@
     const route = parseRoute(window.location.hash);
     if (route.kind === 'none') {
       cancelRequest();
-      showNoCode();
+      showStart('');
       return;
     }
     if (route.kind === 'invalid') {
-      cancelRequest();  // no request for a malformed code
+      cancelRequest();  // no request for a malformed token
       showInvalid();
       return;
     }
     if (route.code === session.code) {
-      // Same application: re-render from memory (e.g. app page <-> DVP page).
+      // Same token: re-render from memory (list <-> application <-> DVP page).
       if (session.answer) {
         showAnswer(route, session.answer);
         return;
@@ -1062,7 +1330,7 @@
   }
 
   // ===========================================================================
-  // 10. Start
+  // 11. Start
   // ===========================================================================
 
   // Pure functions only, for the page tests.

@@ -1,406 +1,488 @@
 'use strict';
 /**
- * Backend tests: apps-script/Code.gs run in Node with mocked Google services
- * (tests/support/gas-env.js) against a fake Monday API (tests/support/fake-monday.js).
- * All data is synthetic. Run with: npm test
+ * Backend tests: apps-script/Code.gs in Node, with mocked Google services
+ * (tests/support/gas-env.js) and a fake Monday (tests/support/fake-monday.js).
+ * Synthetic data only. Run with `npm test`.
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('crypto');
 const { createGasEnv } = require('../support/gas-env');
-const { createFakeMonday, faItem, dvpItem, FA, DVP, LINK_COL, REL_COL, SENTINELS } = require('../support/fake-monday');
+const { createFakeMonday, faItem, dvpItem, FA, DVP, SENTINELS } = require('../support/fake-monday');
 
-const SITE = 'https://status.example.org';
-const BASE_PROPS = { MONDAY_API_TOKEN: 'test-token-xyz', STATUS_LINK_COLUMN_ID: LINK_COL, SITE_URL: SITE };
-const CODE_RE = /^[A-Za-z0-9_-]{22}$/;
-const ALLOWED_FA_COLUMNS = ['text_mm4k2vch', 'color_mm4kmej3', 'color_mm4kpp3q', 'date_mm4kw11a', 'date_mm4kpckv', 'numeric_mm4k6919', 'color_mm6be9ge', 'long_text_mm4kq322', 'link_mm4kmq24', 'link_mm6hfp5g', 'color_mm6eay19', LINK_COL];
-const ALLOWED_DVP_COLUMNS = ['date_mm8dsx4y', 'date_mm8dm7a0', 'link_mm8rp25j', 'color_mm8dhgvr', REL_COL];
+const SECRET = 'test-secret-0123456789abcdef0123456789abcdef';
+const PROPS = { MONDAY_API_TOKEN: 'test-token-xyz', SITE_URL: 'https://status.example.org', LINK_SECRET: SECRET };
 
-/** A fixed, valid code for pre-filled cells: 'C' + 21 chars from the seed. */
-const codeOf = (seed) => (seed + 'ABCDEFGHIJKLMNOPQRSTUVWXYZ').replace(/[^A-Za-z0-9_-]/g, 'x').slice(0, 22);
-const linkTo = (code) => SITE + '/#' + code;
+const ALLOWED_FA = ['text_mm4k2vch', 'color_mm4kmej3', 'color_mm4kpp3q', 'date_mm4kw11a', 'date_mm4kpckv',
+  'numeric_mm4k6919', 'color_mm6be9ge', 'long_text_mm4kq322', 'link_mm4kmq24', 'link_mm6hfp5g'];
+const EMAIL_COLUMNS = ['email_mm4ke170', 'text_mm4kvrar'];
+const ALLOWED_DVP = ['date_mm8dsx4y', 'date_mm8dm7a0', 'link_mm8rp25j', 'color_mm8dhgvr'];
+const APP_KEYS = ['id', 'name', 'institution', 'type', 'submitted', 'state', 'lock', 'testing', 'partyId',
+  'website', 'announcement', 'updated', 'dvp'];
+const DVP_KEYS = ['id', 'name', 'state', 'submitted', 'finalApproval', 'requestUrl', 'requestRef', 'updated'];
 
-/** Builds a fake Monday + a script environment wired to it. */
-function setup(opts) {
-  const o = opts || {};
-  const fake = createFakeMonday({ fa: o.fa || [], dvp: o.dvp || [], statusLinkLabel: o.label === true, statusLinkLabelDeactivated: o.labelDeactivated });
-  const env = createGasEnv({ props: Object.assign({}, BASE_PROPS, o.props || {}), fetch: fake.handle });
-  return { fake, env };
+/** Seven FA rows and four DVP requests covering the interesting cases. */
+function fixture() {
+  return {
+    fa: [
+      faItem({
+        id: 101, name: 'Harbor Swap', institution: 'Harbor Labs', email: 'Alice@Harbor.example',
+        responsible: 'bob@harbor.example; Carol <carol@harbor.example>', status: '1b-FAAC Approved-waiting on tokenomics',
+        statusChangedAt: '2026-10-20T10:00:00Z', type: 'Non-Issuer', submitted: '2026-09-01', lockVerified: '2026-09-10',
+        lockedAmount: 1.5, testing: 'Done', partyId: 'harbor::1220abcd', website: 'https://harbor.example',
+        announcement: 'https://lists.example/announce/1'
+      }),
+      faItem({
+        id: 102, name: 'Harbor Vault', institution: 'Harbor Labs', email: 'alice@harbor.example', status: '2-Approved',
+        submitted: '2026-10-01', announcement: 'https://lists.example/vault', website: 'javascript:alert(1)'
+      }),
+      faItem({ id: 103, name: 'Orbit Ledger', institution: 'Orbit Inc', email: 'dev@orbit.example', status: '4-No', submitted: '2026-08-01' }),
+      faItem({ id: 104, name: 'No Contact App', institution: 'Ghost Co', status: '1-Needs Review' }),
+      faItem({ id: 105, name: 'Lumen Wallet', institution: 'Lumen Labs', responsible: 'ops@lumen.example and cto@lumen.example', status: '2-Approved' }),
+      faItem({ id: 106, name: 'Lumen Pay', institution: 'Lumen Labs', email: 'ops@lumen.example', status: 'Some New Label' }),
+      faItem({ id: 107, name: 'Quillpoint Vaults', institution: 'Quillpoint', email: 'hi@quillpoint.example', status: '1-Needs Review' })
+    ],
+    dvp: [
+      dvpItem({ id: 9001, name: 'Orbit Ledger', status: 'Denied', submitted: '2026-08-23', finalApproval: '2026-11-03', requestUrl: 'https://lists.sync.global/g/accountability/message/116', requestText: '#116 – Orbit Ledger' }),
+      dvpItem({ id: 9002, name: 'Lumen Wallet / Lumen Pay (Lumen Labs)', status: 'Tokenomics Apporval', submitted: '2026-08-24', finalApproval: '2026-11-03', requestUrl: 'https://lists.sync.global/g/accountability/message/120' }),
+      dvpItem({ id: 9003, name: 'Harbor Swap (Aug request)', status: 'FAAC Approval', submitted: '2026-08-20' }),
+      dvpItem({ id: 9004, name: 'Quillpoint', status: 'New Submission', submitted: '2026-08-21' })
+    ]
+  };
 }
 
-/** n synthetic FA rows with empty Status links. */
-function emptyRows(n, extra) {
-  return Array.from({ length: n }, (_, i) => faItem(Object.assign({ id: 1000 + i, name: 'App ' + i, status: '1-Needs Review' }, extra || {})));
+const ADDRESSES = ['alice@harbor.example', 'bob@harbor.example', 'carol@harbor.example', 'dev@orbit.example',
+  'ops@lumen.example', 'cto@lumen.example', 'hi@quillpoint.example'];
+
+function setupEnv(data, props) {
+  const monday = createFakeMonday(data || fixture());
+  const env = createGasEnv({ props: Object.assign({}, PROPS, props || {}), fetch: monday.handle });
+  return { env, monday };
 }
 
-/** The code written into a row's Status link cell, read back from the fake board. */
-function writtenCode(fake, itemId) {
-  const cell = fake.cell(itemId, LINK_COL);
-  if (!cell || !cell.value) return null;
-  const url = JSON.parse(cell.value).url;
-  return url.slice(url.indexOf('#') + 1);
+/** Refreshes, then returns the apps an address sees (or null when not found). */
+function appsOf(env, email) {
+  const { body } = env.get(env.tokenFor(email));
+  return body.found ? body.apps : null;
 }
 
-// ============================================================ codes and link cells
+function shardKeys(env) {
+  return env.cache.keys().filter((key) => /^fa2:\d+$/.test(key));
+}
 
-test('new codes are 22 base64url characters and unique', () => {
-  const { env } = setup();
-  const seen = new Set();
-  for (let i = 0; i < 3000; i++) {
-    const code = env.call('newCode_', {});
-    assert.match(code, CODE_RE);
-    seen.add(code);
-  }
-  assert.equal(seen.size, 3000);
+// ---------------------------------------------------------------------------
+// Tokens and addresses
+// ---------------------------------------------------------------------------
+
+test('tokens: 22 base64url characters, an HMAC of the address, different per address and per secret', () => {
+  const { env } = setupEnv();
+  const token = env.call('tokenFor_', SECRET, 'alice@harbor.example');
+  assert.match(token, /^[A-Za-z0-9_-]{22}$/);
+  const expected = crypto.createHmac('sha256', SECRET).update('alice@harbor.example').digest('base64url').slice(0, 22);
+  assert.equal(token, expected);
+  assert.equal(env.call('tokenFor_', SECRET, 'alice@harbor.example'), token, 'stable');
+  assert.notEqual(env.call('tokenFor_', SECRET, 'bob@harbor.example'), token);
+  assert.notEqual(env.call('tokenFor_', SECRET + 'x', 'alice@harbor.example'), token);
 });
 
-test('codeFromCell_ reads only well-formed Status links', () => {
-  const { env } = setup();
-  const code = codeOf('k7Qm2xV9pLr4TzN8wYc3Ef');
-  const link = (url, text) => ({ id: LINK_COL, type: 'link', text: text || url, value: JSON.stringify({ url: url, text: text || url }) });
-  assert.equal(env.call('codeFromCell_', { id: LINK_COL, type: 'link', text: '', value: null }), '', 'empty cell');
-  assert.equal(env.call('codeFromCell_', link(linkTo(code))), code);
-  assert.equal(env.call('codeFromCell_', link(linkTo(code) + '/dvp-147')), code, 'sub-route');
-  assert.equal(env.call('codeFromCell_', link('https://old-host.example/#' + code, 'Status link')), code, 'any host');
-  assert.equal(env.call('codeFromCell_', link('https://example.org/no-code')), null, 'no #');
-  assert.equal(env.call('codeFromCell_', link(linkTo(code.slice(0, 21)))), null, 'too short');
-  assert.equal(env.call('codeFromCell_', { id: LINK_COL, type: 'link', text: 'typed by hand', value: null }), null, 'text but no value: never overwritten');
-  assert.equal(env.call('codeFromCell_', null), null, 'column missing');
+test('normaliseEmail_ trims and lower-cases, and rejects anything that is not one address', () => {
+  const { env } = setupEnv();
+  assert.equal(env.call('normaliseEmail_', '  Alice@Harbor.Example '), 'alice@harbor.example');
+  ['', 'nope', 'a@b', 'a b@c.com', 'a@b.com, c@d.com', 'mailto:a@b.com', 'x'.repeat(250) + '@a.com', null, 42]
+    .forEach((bad) => assert.equal(env.call('normaliseEmail_', bad), '', String(bad)));
 });
 
-// ============================================================ the applicant view
+test('emailsOfRow_ reads the Email column and every address in "Emails for Responsible Persons"', () => {
+  const { env } = setupEnv();
+  const rows = fixture().fa;
+  assert.deepEqual(Array.from(env.call('emailsOfRow_', rows[0])), ['alice@harbor.example', 'bob@harbor.example', 'carol@harbor.example']);
+  assert.deepEqual(Array.from(env.call('emailsOfRow_', rows[4])), ['ops@lumen.example', 'cto@lumen.example']);
+  assert.deepEqual(Array.from(env.call('emailsOfRow_', rows[3])), []);
+  const same = faItem({ id: 1, name: 'x', email: 'a@x.example', responsible: 'A@X.example, a@x.example' });
+  assert.deepEqual(Array.from(env.call('emailsOfRow_', same)), ['a@x.example'], 'no duplicates');
+  const many = faItem({ id: 2, name: 'y', responsible: Array.from({ length: 15 }, (_, i) => 'p' + i + '@y.example').join(' ') });
+  assert.equal(env.call('emailsOfRow_', many).length, 10, 'capped');
+});
 
-test('every FA Status label maps to its state key; empty and unknown labels too', () => {
-  const { env } = setup();
-  const cases = {
+// ---------------------------------------------------------------------------
+// Labels and DVP matching
+// ---------------------------------------------------------------------------
+
+test('board labels map to state keys; unknown labels fall back and are counted', () => {
+  const { env } = setupEnv();
+  const fa = {
     '0-Locked+Needs Review': 'in_review', '1-Needs Review': 'in_review', '1b-FAAC Approved-waiting on tokenomics': 'with_tokenomics',
     '2-Approved': 'approved', '3-CIP-0116-paused': 'on_hold', '4-No': 'not_approved', '5-Revoked': 'revoked',
-    '6-Withdrawn': 'withdrawn', '7-Closed-new-process': 'closed_process', '': 'received', 'Some new label': 'in_review'
+    '6-Withdrawn': 'withdrawn', '7-Closed-new-process': 'closed_process'
   };
-  Object.keys(cases).forEach((label) => {
-    const app = env.call('toApplicantView', faItem({ id: 1, name: 'X', status: label || null }), []);
-    assert.equal(app.state, cases[label], label || '(empty)');
+  Object.keys(fa).forEach((label) => assert.equal(env.call('faState_', label), fa[label], label));
+  assert.equal(env.call('faState_', null), 'received');
+  const stats = env.call('newStats_', 'test');
+  assert.equal(env.call('faState_', 'Brand New', stats), 'in_review');
+  assert.equal(stats.unknownLabels.fa['Brand New'], 1);
+  assert.equal(env.call('faState_', 'toString', stats), 'in_review', 'no prototype lookups');
+
+  assert.equal(env.call('testingState_', 'Sent Email'), 'action_needed');
+  assert.equal(env.call('testingState_', 'Done'), 'complete');
+  assert.equal(env.call('testingState_', null), 'not_started');
+
+  assert.equal(env.call('dvpState_', 'Tokenomics Apporval'), 'approved');
+  assert.equal(env.call('dvpState_', 'Tokenomics Approval'), 'approved');
+  assert.equal(env.call('dvpState_', 'FAAC Approval'), 'with_tokenomics');
+  assert.equal(env.call('dvpState_', 'Denied'), 'not_approved');
+  assert.equal(env.call('dvpState_', 'Closed'), 'closed');
+  assert.equal(env.call('dvpState_', 'New Submission'), 'in_review');
+});
+
+test('DVP name keys: cut at the first qualifier, split on "/", exact matches only', () => {
+  const { env } = setupEnv();
+  const keys = (name) => Array.from(env.call('dvpNameKeys_', name));
+  assert.deepEqual(keys('Tidewater DEX (Tidewater Labs)'), ['tidewater dex']);
+  assert.deepEqual(keys('Lumen Wallet / Lumen Pay (Lumen Labs)'), ['lumen wallet', 'lumen pay']);
+  assert.deepEqual(keys('Fernway – FW Wallet + RFQ DEX / Harbor'), ['fernway']);
+  assert.deepEqual(keys('Copperleaf (Oct request – multi-collateral)'), ['copperleaf']);
+  assert.deepEqual(keys('  Orbit   Exchange  (Orbit-Ventures-1)'), ['orbit exchange']);
+  assert.equal(env.call('baseNameKey_', 'Copperleaf Markets - Copperleaf Labs LLC'), 'copperleaf markets');
+  assert.equal(env.call('baseNameKey_', 'Harbor Swap (copy)'), 'harbor swap');
+  assert.equal(env.call('nameKey_', 'The  Vault'), 'the vault');
+});
+
+test('refresh attaches DVP requests to the FA apps with the same name', () => {
+  const { env } = setupEnv();
+  const stats = env.call('refresh');
+  assert.equal(stats.dvpMatched, 3);
+  assert.equal(stats.dvpUnmatched, 1, '"Quillpoint" does not match "Quillpoint Vaults"');
+
+  const harbor = appsOf(env, 'bob@harbor.example')[0];
+  assert.deepEqual(harbor.dvp.map((d) => d.id), ['9003']);
+  const orbit = appsOf(env, 'dev@orbit.example')[0];
+  assert.deepEqual(orbit.dvp.map((d) => d.id), ['9001']);
+  const lumen = appsOf(env, 'ops@lumen.example');
+  assert.deepEqual(lumen.map((a) => [a.name, a.dvp.map((d) => d.id)]), [['Lumen Pay', ['9002']], ['Lumen Wallet', ['9002']]]);
+  assert.deepEqual(appsOf(env, 'hi@quillpoint.example')[0].dvp, []);
+});
+
+// ---------------------------------------------------------------------------
+// refresh, the cache and the answer
+// ---------------------------------------------------------------------------
+
+test('refresh: each address sees exactly the applications that list it, newest first', () => {
+  const { env } = setupEnv();
+  const stats = env.call('refresh');
+  assert.equal(stats.faRows, 7);
+  assert.equal(stats.dvpRows, 4);
+  assert.equal(stats.appsServed, 6);
+  assert.equal(stats.appsWithoutEmail, 1);
+  assert.equal(stats.addresses, ADDRESSES.length);
+
+  assert.deepEqual(appsOf(env, 'alice@harbor.example').map((a) => a.name), ['Harbor Vault', 'Harbor Swap']);
+  assert.deepEqual(appsOf(env, 'ALICE@harbor.example ').map((a) => a.name), ['Harbor Vault', 'Harbor Swap'], 'case and spaces ignored');
+  assert.deepEqual(appsOf(env, 'bob@harbor.example').map((a) => a.name), ['Harbor Swap']);
+  assert.deepEqual(appsOf(env, 'carol@harbor.example').map((a) => a.name), ['Harbor Swap']);
+  assert.deepEqual(appsOf(env, 'cto@lumen.example').map((a) => a.name), ['Lumen Wallet']);
+  assert.equal(appsOf(env, 'stranger@nowhere.example'), null);
+  ADDRESSES.forEach((email) => assert.ok(!appsOf(env, email).some((a) => a.name === 'No Contact App')));
+});
+
+test('the answer holds only allow-listed fields, links are https-only, approval-only fields stay hidden', () => {
+  const { env } = setupEnv();
+  env.call('refresh');
+  const [vault, swap] = appsOf(env, 'alice@harbor.example');
+  [vault, swap].forEach((app) => assert.deepEqual(Object.keys(app), APP_KEYS));
+
+  assert.deepEqual(swap, {
+    id: '101', name: 'Harbor Swap', institution: 'Harbor Labs', type: 'Non-Issuer', submitted: '2026-09-01',
+    state: 'with_tokenomics', lock: { verified: '2026-09-10', amountMillions: 1.5 }, testing: 'complete',
+    partyId: 'harbor::1220abcd', website: 'https://harbor.example', announcement: null, updated: '2026-10-20',
+    dvp: [{ id: '9003', name: 'Harbor Swap (Aug request)', state: 'with_tokenomics', submitted: '2026-08-20', finalApproval: null, requestUrl: null, requestRef: null, updated: null }]
   });
-  const testing = { '': 'not_started', 'Sent Email': 'action_needed', 'Pending Review': 'in_progress', 'Stuck': 'in_progress', 'Done': 'complete', 'Odd': 'in_progress' };
-  Object.keys(testing).forEach((label) => {
-    assert.equal(env.call('toApplicantView', faItem({ id: 1, name: 'X', testing: label || null }), []).testing, testing[label], 'testing ' + label);
-  });
+  assert.equal(vault.state, 'approved');
+  assert.equal(vault.announcement, 'https://lists.example/vault');
+  assert.equal(vault.website, null, 'javascript: URL dropped');
+
+  const orbit = appsOf(env, 'dev@orbit.example')[0];
+  assert.deepEqual(Object.keys(orbit.dvp[0]), DVP_KEYS);
+  assert.equal(orbit.dvp[0].state, 'not_approved');
+  assert.equal(orbit.dvp[0].finalApproval, null, 'final approval date only when approved');
+  assert.equal(orbit.dvp[0].requestRef, '116');
+  const wallet = appsOf(env, 'cto@lumen.example')[0];
+  assert.equal(wallet.dvp[0].finalApproval, '2026-11-03');
 });
 
-test('the view holds exactly the contract fields, https-only links and the announcement only when approved', () => {
-  const { env } = setup();
-  const row = {
-    id: 7, name: 'Harbor Swap', institution: 'Fernway Labs', status: '2-Approved', statusChangedAt: '2026-11-03T10:00:00Z',
-    type: 'Non-Issuer', submitted: '2026-10-14', lockVerified: '2026-10-18', lockedAmount: 1.5, testing: 'Done',
-    partyId: 'harborswap-1::1220abc', website: 'https://harborswap.example', announcement: 'https://lists.example.org/g/tokenomics/message/1'
-  };
-  const app = JSON.parse(JSON.stringify(env.call('toApplicantView', faItem(row), [])));
-  assert.deepEqual(Object.keys(app).sort(), ['announcement', 'dvp', 'institution', 'lock', 'name', 'partyId', 'state', 'submitted', 'testing', 'type', 'updated', 'website']);
-  assert.deepEqual(app, {
-    name: 'Harbor Swap', institution: 'Fernway Labs', type: 'Non-Issuer', submitted: '2026-10-14', state: 'approved',
-    lock: { verified: '2026-10-18', amountMillions: 1.5 }, testing: 'complete', partyId: 'harborswap-1::1220abc',
-    website: 'https://harborswap.example', announcement: 'https://lists.example.org/g/tokenomics/message/1', updated: '2026-11-03', dvp: []
-  });
-  const notApproved = env.call('toApplicantView', faItem(Object.assign({}, row, { status: '5-Revoked', website: 'http://plain.example' })), []);
-  assert.equal(notApproved.announcement, null, 'announcement only when approved');
-  assert.equal(notApproved.website, null, 'http links are dropped');
-  const noLock = env.call('toApplicantView', faItem({ id: 8, name: 'Y', lockedAmount: 0 }), []);
-  assert.deepEqual(JSON.parse(JSON.stringify(noLock.lock)), { verified: null, amountMillions: null });
-  assert.equal(noLock.updated, null);
-});
-
-test('DVP requests: grouped by Connect boards link, newest first, finalApproval only when approved', () => {
-  const fa = [faItem({ id: 1, name: 'Harbor Swap', status: '1-Needs Review', statusLink: linkTo(codeOf('Harbor')) })];
-  const dvp = [
-    dvpItem({ id: 11, name: 'RFQ settlement', status: 'New Submission', submitted: '2026-10-20', finalApproval: '2026-10-21', requestUrl: 'https://lists.example.org/g/accountability/message/147', requestText: '#147 – Harbor', faIds: [1] }),
-    dvpItem({ id: 12, name: 'Spot pairs', status: 'Tokenomics Apporval', submitted: '2026-11-01', finalApproval: '2026-11-03', faIds: [1] }),
-    dvpItem({ id: 13, name: 'Unlinked', status: 'Denied', submitted: '2026-11-02', faIds: [] })
-  ];
-  const { env } = setup({ fa, dvp, props: { DVP_LINK_COLUMN_ID: REL_COL } });
+test('privacy: forbidden columns are never requested; addresses and sentinels appear nowhere', () => {
+  const { env, monday } = setupEnv();
   env.call('refresh');
-  const res = env.get(codeOf('Harbor')).body;
-  assert.equal(res.found, true);
-  assert.deepEqual(res.app.dvp.map((d) => d.name), ['Spot pairs', 'RFQ settlement']);
-  assert.deepEqual(res.app.dvp[0], { id: '12', name: 'Spot pairs', state: 'approved', submitted: '2026-11-01', finalApproval: '2026-11-03', requestUrl: null, requestRef: null, updated: null });
-  assert.equal(res.app.dvp[1].finalApproval, null, 'not approved: no final approval date');
-  assert.equal(res.app.dvp[1].requestRef, '147');
-  assert.equal(res.app.dvp[1].state, 'in_review');
-});
+  const allowed = new Set(ALLOWED_FA.concat(EMAIL_COLUMNS, ALLOWED_DVP));
+  monday.requestedColumnIds.forEach((id) => assert.ok(allowed.has(id), 'requested ' + id));
 
-test('without DVP_LINK_COLUMN_ID the DVP board is never read', () => {
-  const { env } = setup({ fa: [faItem({ id: 1, name: 'A', statusLink: linkTo(codeOf('A')) })], dvp: [dvpItem({ id: 9, name: 'D', faIds: [1] })] });
-  env.call('refresh');
-  assert.ok(env.requests.every((r) => String((r.payload.variables || {}).b) !== DVP));
-  assert.deepEqual(env.get(codeOf('A')).body.app.dvp, []);
-});
-
-// ============================================================ refresh: issuing links
-
-test('refresh writes links into empty cells only, 20 per request, at most 200 per run', () => {
-  const existing = codeOf('Existing');
-  const dup = codeOf('Duplicate');
-  const fa = emptyRows(230).concat([
-    faItem({ id: 1, name: 'Has link', statusLink: linkTo(existing) }),
-    faItem({ id: 2, name: 'Hand typed', statusLinkRaw: { text: 'see email', value: JSON.stringify({ url: 'https://example.org/page', text: 'see email' }) } }),
-    faItem({ id: 3, name: 'Dup A', statusLink: linkTo(dup) }),
-    faItem({ id: 4, name: 'Dup B', statusLink: linkTo(dup) })
-  ]);
-  const { fake, env } = setup({ fa });
-  const stats = env.call('refresh');
-
-  assert.equal(stats.linksWritten, 200);
-  assert.equal(stats.rowsDeferredByCap, 30);
-  assert.equal(stats.unreadableLinks, 1);
-  assert.equal(stats.duplicateCodes, 1);
-  assert.ok(fake.aliasesPerMutation.every((n) => n <= 20), 'batches of at most 20');
-  assert.equal(fake.aliasesPerMutation.reduce((a, b) => a + b, 0), 200);
-
-  // Link format and the untouched cells.
-  const written = fa.slice(0, 230).map((row) => fake.cell(row.id, LINK_COL)).filter((c) => c.value);
-  assert.equal(written.length, 200);
-  const sample = JSON.parse(written[0].value);
-  assert.equal(sample.text, 'Status link');
-  assert.match(sample.url, /^https:\/\/status\.example\.org\/#[A-Za-z0-9_-]{22}$/);
-  assert.equal(JSON.parse(fake.cell(2, LINK_COL).value).url, 'https://example.org/page', 'hand-typed cell never overwritten');
-  assert.equal(writtenCode(fake, 1), existing, 'existing link kept');
-
-  // Serving: existing link yes, duplicates no, freshly written yes.
-  assert.equal(env.get(existing).body.found, true);
-  assert.deepEqual(env.get(dup).body, { found: false });
-  assert.equal(env.get(writtenCode(fake, written.length && fa[0].id) || existing).body.found, true);
-
-  // The next run writes the 30 that were deferred.
-  const second = env.call('refresh');
-  assert.equal(second.linksWritten, 30);
-  assert.equal(second.rowsDeferredByCap, 0);
-  assert.equal(env.call('refresh').linksPlanned, 0, 'nothing left to write');
-});
-
-test('a failed write leaves only that row unserved; a cleared cell gets a new code and the old link dies', () => {
-  const fa = emptyRows(3);
-  const { fake, env } = setup({ fa });
-  fake.failItems.add('1001');
-  const stats = env.call('refresh');
-  assert.equal(stats.linksWritten, 2);
-  assert.equal(stats.linkWriteFailures, 1);
-  assert.equal(stats.errorCodes.InvalidItemIdException, 1);
-  assert.equal(writtenCode(fake, 1001), null);
-  assert.equal(stats.served, 2);
-
-  // Clear a link the way the team would, then refresh.
-  const old = writtenCode(fake, 1000);
-  fake.cell(1000, LINK_COL).value = null;
-  fake.cell(1000, LINK_COL).text = '';
-  fake.failItems.clear();
-  env.call('refresh');
-  const fresh = writtenCode(fake, 1000);
-  assert.notEqual(fresh, old);
-  assert.deepEqual(env.get(old).body, { found: false });
-  assert.equal(env.get(fresh).body.found, true);
-});
-
-test('rate limiting stops the writes for this run without serving unsaved codes', () => {
-  const { fake, env } = setup({ fa: emptyRows(45) });
-  fake.failMutationsWith = { code: 429, body: JSON.stringify({ errors: [{ message: 'Complexity budget exhausted', extensions: { code: 'COMPLEXITY_BUDGET_EXHAUSTED' } }] }), headers: { 'Retry-After': '2' } };
-  const stats = env.call('refresh');
-  assert.equal(stats.rateLimited, true);
-  assert.equal(stats.linksWritten, 0);
-  assert.equal(stats.served, 0);
-  assert.equal(fake.mutations, 3, 'one request, retried twice, then no further batches');
-  assert.deepEqual(env.sleeps, [2000, 2000]);
-});
-
-// ============================================================ refresh: the automatic email
-
-function emailSetup(rows, opts) {
-  return setup(Object.assign({ fa: rows, label: true, props: { SEND_LINK_EMAIL: 'true', EMAIL_NEW_ROWS_FROM: '2026-12-01' } }, opts || {}));
-}
-const sendEmailOf = (fake, id) => (fake.cell(id, 'color_mm6eay19') || {}).text || null;
-
-test('email label is set only on new rows, never twice, and not on old rows', () => {
-  const rows = [
-    faItem({ id: 1, name: 'New', created_at: '2026-12-02T09:00:00Z' }),
-    faItem({ id: 2, name: 'Old', created_at: '2026-11-20T09:00:00Z' }),
-    faItem({ id: 3, name: 'Already', created_at: '2026-12-03T09:00:00Z', sendEmail: 'Status link' }),
-    faItem({ id: 4, name: 'Other email sent', created_at: '2026-12-03T09:00:00Z', sendEmail: 'FA Type Email' })
-  ];
-  const { fake, env } = emailSetup(rows);
-  const stats = env.call('refresh');
-  assert.equal(stats.linksWritten, 4);
-  assert.equal(stats.emailLabelsSet, 2);
-  assert.equal(stats.emailSkippedAlreadyLabelled, 1);
-  assert.equal(sendEmailOf(fake, 1), 'Status link');
-  assert.equal(sendEmailOf(fake, 2), null, 'created before EMAIL_NEW_ROWS_FROM');
-  assert.equal(sendEmailOf(fake, 4), 'Status link');
-});
-
-test('email is off unless SEND_LINK_EMAIL is exactly "true"', () => {
-  const { fake, env } = setup({ fa: [faItem({ id: 1, name: 'New', created_at: '2026-12-02T09:00:00Z' })], label: true, props: { SEND_LINK_EMAIL: 'yes', EMAIL_NEW_ROWS_FROM: '2026-12-01' } });
-  env.call('refresh');
-  assert.equal(sendEmailOf(fake, 1), null);
-});
-
-test('the brake: more than 20 qualifying rows get links but no email label', () => {
-  const { fake, env } = emailSetup(emptyRows(21, { created_at: '2026-12-02T09:00:00Z' }));
-  const stats = env.call('refresh');
-  assert.equal(stats.linksWritten, 21);
-  assert.equal(stats.emailBrakeTripped, true);
-  assert.equal(stats.emailLabelsSet, 0);
-  assert.ok(emptyRows(21).every((row) => sendEmailOf(fake, row.id) === null));
-});
-
-test('no "Status link" label: links are written without it (labels are never created)', () => {
-  const { fake, env } = emailSetup([faItem({ id: 1, name: 'New', created_at: '2026-12-02T09:00:00Z' })], { label: false });
-  const stats = env.call('refresh');
-  assert.equal(stats.linksWritten, 1);
-  assert.equal(stats.errorCodes.status_link_label_missing, 1);
-  assert.equal(sendEmailOf(fake, 1), null);
-  assert.ok(env.requests.every((r) => !/create_labels_if_missing/.test(r.payload.query)));
-});
-
-test('label missing at write time: the link is retried on its own', () => {
-  const { fake, env } = emailSetup([faItem({ id: 1, name: 'New', created_at: '2026-12-02T09:00:00Z' })]);
-  fake.writeRejectsLabel = true;
-  const stats = env.call('refresh');
-  assert.equal(stats.linksWritten, 1);
-  assert.equal(stats.emailLabelsSet, 0);
-  assert.equal(stats.errorCodes.missingLabel, 1);
-  assert.match(writtenCode(fake, 1), CODE_RE);
-});
-
-// ============================================================ privacy
-
-test('privacy: only allow-listed columns are requested, and nothing forbidden reaches the cache, answers or logs', () => {
-  const fa = [
-    faItem({ id: 1, name: 'Harbor Swap', status: '2-Approved', institution: 'Fernway Labs', sendEmail: 'FA Type Email' }),
-    faItem({ id: 2, name: 'Quillpoint Vault', status: '4-No', statusLink: linkTo(codeOf('Quill')) })
-  ];
-  const dvp = [dvpItem({ id: 11, name: 'RFQ settlement', status: 'FAAC Approval', faIds: [1] })];
-  const { fake, env } = setup({ fa, dvp, props: { DVP_LINK_COLUMN_ID: REL_COL } });
-  fake.failItems.add('999'); // no effect, keeps the fake's error path warm
-  env.call('refresh');
-
-  const requested = Array.from(fake.requestedColumnIds);
-  requested.forEach((id) => assert.ok(ALLOWED_FA_COLUMNS.concat(ALLOWED_DVP_COLUMNS).includes(id), 'requested a forbidden column: ' + id));
-  Object.keys(SENTINELS).forEach((id) => assert.ok(!requested.includes(id)));
-
-  const code1 = writtenCode(fake, 1);
-  const answers = [env.get(code1).body, env.get(codeOf('Quill')).body];
-  const everything = env.cache.raw() + JSON.stringify(answers);
-  Object.values(SENTINELS).concat(['SENTINEL']).forEach((s) => assert.ok(!everything.includes(s), 'leaked ' + s));
-  assert.ok(!everything.includes('FA Type Email'), 'Send Email never leaves the script');
+  const answers = ADDRESSES.map((email) => JSON.stringify(env.get(env.tokenFor(email)).body)).join('\n');
+  const everything = [env.cache.raw(), answers, env.logText()].join('\n').toLowerCase();
+  ADDRESSES.forEach((email) => assert.ok(everything.indexOf(email) === -1, email + ' leaked'));
+  assert.ok(everything.indexOf('@') === -1, 'no address-like text anywhere');
+  Object.values(SENTINELS).concat(['SENTINEL-DVP-ANSWER']).forEach((s) => assert.ok(everything.indexOf(s.toLowerCase()) === -1, s));
 
   const logs = env.logText();
-  [code1, codeOf('Quill'), 'Harbor Swap', 'Quillpoint', 'https://', 'test-token-xyz', 'SENTINEL'].forEach((s) => assert.ok(!logs.includes(s), 'log contains ' + s));
+  ADDRESSES.forEach((email) => assert.ok(logs.indexOf(env.tokenFor(email)) === -1, 'token in log'));
+  ['Harbor Swap', 'Orbit Inc', 'harbor.example'].forEach((s) => assert.ok(logs.indexOf(s) === -1, s + ' in log'));
+  assert.ok(logs.indexOf(PROPS.MONDAY_API_TOKEN) === -1);
 });
 
-test('privacy: Monday error messages (which echo values) never reach the logs', () => {
-  const { fake, env } = emailSetup([faItem({ id: 1, name: 'New', created_at: '2026-12-02T09:00:00Z' })]);
-  fake.writeRejectsLabel = true; // the fake's error message quotes the written values, link included
+test('nothing is ever written to Monday', () => {
+  const { env, monday } = setupEnv(fixture(), { LINK_SECRET: '' });
+  env.call('setup');
   env.call('refresh');
-  const logs = env.logText();
-  assert.ok(!logs.includes("doesn't exist"));
-  assert.ok(!logs.includes('status.example.org'));
+  env.get(env.tokenFor('alice@harbor.example'));
+  env.post({ email: 'alice@harbor.example' });
+  env.cache.clear();
+  env.get(env.tokenFor('bob@harbor.example'));
+  assert.equal(monday.mutations, 0);
+  assert.ok(monday.queries > 0);
+  env.requests.forEach((r) => assert.match(r.payload.query, /^query /));
+  env.requests.forEach((r) => assert.equal(r.options.headers['API-Version'], '2026-10'));
 });
 
-// ============================================================ cache
-
-test('cache: all 64 shards in one putAll with a 6-hour expiry', () => {
-  const { env } = setup({ fa: emptyRows(5) });
+test('the cache: 64 shards in one putAll, 6-hour expiry, removed addresses lose access on the next run', () => {
+  const data = fixture();
+  const { env, monday } = setupEnv(data);
   env.call('refresh');
-  const keys = env.cache.keys().filter((k) => k.startsWith('fa1:'));
-  assert.equal(keys.length, 64);
+  assert.equal(shardKeys(env).length, 64);
   assert.equal(env.putAllCalls, 1);
-  keys.forEach((k) => assert.equal(env.cache.ttlOf(k), 21600));
-  const shards = env.cache.dump();
-  assert.equal(Object.values(shards).reduce((n, shard) => n + Object.keys(shard).length, 0), 5);
+  shardKeys(env).forEach((key) => assert.equal(env.cache.ttlOf(key), 21600));
+  assert.ok(appsOf(env, 'bob@harbor.example'));
+
+  // Bob is taken off the row on Monday.
+  monday.boards[FA].items[0] = faItem({ id: 101, name: 'Harbor Swap', email: 'alice@harbor.example', status: '1-Needs Review' });
+  env.call('refresh');
+  assert.equal(appsOf(env, 'bob@harbor.example'), null);
+  assert.equal(appsOf(env, 'alice@harbor.example').length, 2);
 });
 
-// ============================================================ doGet
+test('reads every page of a large board', () => {
+  const fa = Array.from({ length: 1203 }, (_, i) => faItem({ id: 5000 + i, name: 'App ' + i, email: 'u' + i + '@many.example', status: '2-Approved' }));
+  const { env } = setupEnv({ fa: fa, dvp: [] });
+  const stats = env.call('refresh');
+  assert.equal(stats.faRows, 1203);
+  assert.equal(env.requests.filter((r) => /next_items_page/.test(r.payload.query)).length, 2);
+  assert.equal(appsOf(env, 'u1202@many.example')[0].name, 'App 1202');
+});
 
-test('doGet: bad format, hit, miss in a present shard, and JSON output', () => {
-  const { env } = setup({ fa: [faItem({ id: 1, name: 'Harbor Swap', statusLink: linkTo(codeOf('Harbor')) })] });
+// ---------------------------------------------------------------------------
+// doGet
+// ---------------------------------------------------------------------------
+
+test('doGet: a good token, an unknown one, a malformed one, none at all', () => {
+  const { env, monday } = setupEnv();
   env.call('refresh');
-  const before = env.requests.length;
-
-  ['', 'short', codeOf('Harbor') + 'x', '../../etc/passwd', '<script>alert(1)</script>'].forEach((bad) => {
-    assert.deepEqual(env.get(bad).body, { found: false }, JSON.stringify(bad));
-  });
-  assert.deepEqual(JSON.parse(env.call('doGet').getContent()), { found: false }, 'no event at all');
-
-  const hit = env.get(codeOf('Harbor'));
+  const hit = env.get(env.tokenFor('dev@orbit.example'));
   assert.equal(hit.mimeType, 'application/json');
   assert.equal(hit.body.found, true);
-  assert.equal(hit.body.app.name, 'Harbor Swap');
-  assert.deepEqual(env.get(codeOf('Hzzzz')).body, { found: false }, 'same shard, unknown code');
-  assert.equal(env.requests.length, before, 'answers come from the cache without calling Monday');
+  assert.deepEqual(env.get(env.tokenFor('nobody@x.example')).body, { found: false });
+
+  const queries = monday.queries;
+  const locks = env.lockAcquisitions;
+  assert.deepEqual(env.get('too-short').body, { found: false });
+  assert.deepEqual(env.get('k7Qm2xV9pLr4TzN8wYc3E!').body, { found: false });
+  assert.deepEqual(env.get(undefined).body, { found: false });
+  assert.equal(monday.queries, queries, 'malformed tokens never reach Monday');
+  assert.equal(env.lockAcquisitions, locks);
 });
 
-test('doGet on an evicted cache rebuilds read-only (no writes) and answers', () => {
-  const { fake, env } = setup({ fa: [faItem({ id: 1, name: 'Harbor Swap', statusLink: linkTo(codeOf('Harbor')) })].concat(emptyRows(2)) });
+test('doGet: a missing shard is rebuilt from Monday under the lock', () => {
+  const { env, monday } = setupEnv();
   env.call('refresh');
-  env.cache.clear();
-  const mutationsBefore = fake.mutations;
-  // Clear one written link to prove the rebuild doesn't issue codes.
-  fake.cell(1000, LINK_COL).value = null;
-  fake.cell(1000, LINK_COL).text = '';
-  const res = env.get(codeOf('Harbor')).body;
-  assert.equal(res.found, true);
-  assert.equal(fake.mutations, mutationsBefore, 'no mutation during a page view');
-  assert.equal(writtenCode(fake, 1000), null);
-  assert.equal(env.lockAcquisitions, env.lockReleases, 'lock released');
+  const token = env.tokenFor('alice@harbor.example');
+  env.cache.evict('fa2:' + token.charCodeAt(0));
+  const queries = monday.queries;
+  const locks = env.lockAcquisitions;
+  assert.equal(env.get(token).body.found, true);
+  assert.ok(monday.queries > queries, 'read Monday again');
+  assert.equal(env.lockAcquisitions, locks + 1);
+  assert.equal(env.lockReleases, env.lockAcquisitions);
+  assert.equal(shardKeys(env).length, 64, 'cache refilled');
 });
 
-test('doGet on a miss without the lock, or with broken config, answers unavailable and nothing else', () => {
-  const { env } = setup({ fa: [faItem({ id: 1, name: 'A', statusLink: linkTo(codeOf('A')) })] });
-  env.lockAvailable = false;
-  assert.deepEqual(env.get(codeOf('A')).body, { error: 'unavailable' });
+test('doGet: Monday down or lock busy on a cache miss gives {"error":"unavailable"} and no details', () => {
+  const { env, monday } = setupEnv();
+  monday.failNext = [1, 2, 3].map(() => ({ code: 500, body: 'secret internal detail' }));
+  assert.deepEqual(env.get(env.tokenFor('alice@harbor.example')).body, { error: 'unavailable' });
+  assert.ok(env.logText().indexOf('monday_http_500') !== -1);
+  assert.ok(env.logText().indexOf('secret internal detail') === -1);
 
-  const broken = setup({ props: { MONDAY_API_TOKEN: '' } }).env;
-  assert.deepEqual(broken.get(codeOf('A')).body, { error: 'unavailable' });
-
-  const failing = createGasEnv({ props: BASE_PROPS, fetch: () => { throw new Error('boom with secret detail'); } });
-  const out = failing.get(codeOf('A')).body;
-  assert.deepEqual(out, { error: 'unavailable' });
-  assert.ok(!failing.logText().includes('secret detail'));
+  const second = setupEnv();
+  second.env.lockAvailable = false;
+  assert.deepEqual(second.env.get(second.env.tokenFor('alice@harbor.example')).body, { error: 'unavailable' });
 });
 
-// ============================================================ refresh guards and setup
+// ---------------------------------------------------------------------------
+// doPost: emailing the link
+// ---------------------------------------------------------------------------
 
-test('refresh does nothing when another run holds the lock, or when properties are missing', () => {
-  const busy = setup({ fa: emptyRows(2) });
+test('doPost: an address on an application gets one email with its link', () => {
+  const { env } = setupEnv();
+  env.call('refresh');
+  const res = env.post({ email: '  Alice@Harbor.Example ' });
+  assert.equal(res.mimeType, 'application/json');
+  assert.deepEqual(res.body, { ok: true });
+  assert.equal(env.mail.sent.length, 1);
+  const mail = env.mail.sent[0];
+  const link = 'https://status.example.org/#' + env.tokenFor('alice@harbor.example');
+  assert.equal(mail.to, 'alice@harbor.example');
+  assert.equal(mail.subject, 'Your Featured App status link');
+  assert.equal(mail.name, 'Featured App Status');
+  assert.ok(mail.body.indexOf(link) !== -1);
+  assert.ok(mail.htmlBody.indexOf('href="' + link + '"') !== -1);
+  // The emailed link opens exactly that address's applications.
+  const token = link.split('#')[1];
+  assert.deepEqual(env.get(token).body.apps.map((a) => a.name), ['Harbor Vault', 'Harbor Swap']);
+});
+
+test('doPost: an unknown address gets the same answer and no email, after a similar pause', () => {
+  const { env } = setupEnv();
+  env.call('refresh');
+  assert.deepEqual(env.post({ email: 'stranger@nowhere.example' }).body, { ok: true });
+  assert.equal(env.mail.sent.length, 0);
+  const pause = env.sleeps[env.sleeps.length - 1];
+  assert.ok(pause >= 600 && pause < 1400, 'paused ' + pause);
+});
+
+test('doPost: anything that is not one address is refused as invalid_email', () => {
+  const { env } = setupEnv();
+  env.call('refresh');
+  [{ email: 'not-an-email' }, { email: '' }, { email: 'a@b.com, c@d.com' }, {}, 'garbage', JSON.stringify({ email: 'x'.repeat(3000) + '@a.com' })]
+    .forEach((body) => assert.deepEqual(env.post(body).body, { ok: false, error: 'invalid_email' }, JSON.stringify(body).slice(0, 40)));
+  assert.equal(env.mail.sent.length, 0);
+  // A plain form post works too.
+  const out = env.call('doPost', { parameter: { email: 'dev@orbit.example' }, postData: { contents: 'email=dev%40orbit.example', type: 'application/x-www-form-urlencoded' } });
+  assert.deepEqual(JSON.parse(out.getContent()), { ok: true });
+  assert.equal(env.mail.sent.length, 1);
+});
+
+test('doPost: one email per address per 15 minutes, at most 3 per 6 hours', () => {
+  const { env } = setupEnv();
+  env.call('refresh');
+  const token = env.tokenFor('bob@harbor.example');
+  const key = 'fa2:mail:' + token;
+  const setRecord = (record) => env.eval('CacheService.getScriptCache().put(' + JSON.stringify(key) + ', ' + JSON.stringify(JSON.stringify(record)) + ', 21600)');
+
+  env.post({ email: 'bob@harbor.example' });
+  env.post({ email: 'bob@harbor.example' });
+  assert.equal(env.mail.sent.length, 1, 'cooldown');
+
+  const now = Date.now();
+  setRecord({ first: now - 3600000, count: 1, last: now - 16 * 60000 });
+  env.post({ email: 'bob@harbor.example' });
+  assert.equal(env.mail.sent.length, 2, 'cooldown over');
+
+  setRecord({ first: now - 3600000, count: 3, last: now - 16 * 60000 });
+  env.post({ email: 'bob@harbor.example' });
+  assert.equal(env.mail.sent.length, 2, 'window full');
+
+  setRecord({ first: now - 7 * 3600000, count: 3, last: now - 16 * 60000 });
+  env.post({ email: 'bob@harbor.example' });
+  assert.equal(env.mail.sent.length, 3, 'new window');
+  assert.ok(env.cache.raw().indexOf('bob@') === -1, 'the limit is kept under the token, not the address');
+});
+
+test('doPost: keeps a reserve of the email quota; a failed send is logged without the address', () => {
+  const { env } = setupEnv();
+  env.call('refresh');
+  env.mail.remainingQuota = 10;
+  assert.deepEqual(env.post({ email: 'dev@orbit.example' }).body, { ok: true });
+  assert.equal(env.mail.sent.length, 0);
+  assert.ok(env.logText().indexOf('mail_quota_low') !== -1);
+
+  env.mail.remainingQuota = 100;
+  env.mail.failNext = true;
+  assert.deepEqual(env.post({ email: 'hi@quillpoint.example' }).body, { ok: true });
+  assert.ok(env.logText().indexOf('mail_failed') !== -1);
+  assert.ok(env.logText().indexOf('hi@quillpoint.example') === -1);
+});
+
+test('doPost: Monday down on a cache miss gives {"ok":false,"error":"unavailable"}', () => {
+  const { env, monday } = setupEnv();
+  monday.failNext = [1, 2, 3].map(() => ({ code: 503, body: 'down' }));
+  assert.deepEqual(env.post({ email: 'alice@harbor.example' }).body, { ok: false, error: 'unavailable' });
+  assert.equal(env.mail.sent.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// refresh guards, config and setup
+// ---------------------------------------------------------------------------
+
+test('refresh: skips without the lock, stops on bad settings, keeps the old cache when Monday fails', () => {
+  const busy = setupEnv();
   busy.env.lockAvailable = false;
   assert.equal(busy.env.call('refresh'), undefined);
-  assert.equal(busy.env.requests.length, 0);
+  assert.ok(busy.env.logText().indexOf('lock_busy') !== -1);
 
-  const bad = setup({ fa: emptyRows(2), props: { SITE_URL: 'http://insecure.example' } });
+  const bad = setupEnv(fixture(), { MONDAY_API_TOKEN: '', LINK_SECRET: 'short' });
   assert.equal(bad.env.call('refresh'), undefined);
-  assert.equal(bad.env.requests.length, 0);
-  assert.match(bad.env.logText(), /SITE_URL must be an https/);
-  assert.ok(!bad.env.logText().includes('insecure.example'), 'values are never logged');
-});
+  const log = bad.env.logText();
+  assert.ok(log.indexOf('MONDAY_API_TOKEN is not set') !== -1);
+  assert.ok(log.indexOf('LINK_SECRET is too short') !== -1);
+  assert.ok(log.indexOf('short"') === -1, 'values are never logged');
 
-test('SITE_URL gets a trailing slash, so links are always SITE_URL/#code', () => {
-  const { fake, env } = setup({ fa: emptyRows(1), props: { SITE_URL: 'https://org.github.io/fa-status' } });
+  const { env, monday } = setupEnv();
   env.call('refresh');
-  assert.match(JSON.parse(fake.cell(1000, LINK_COL).value).url, /^https:\/\/org\.github\.io\/fa-status\/#[A-Za-z0-9_-]{22}$/);
+  const before = env.cache.raw();
+  monday.failNext = [1, 2, 3].map(() => ({ code: 500, body: 'x' }));
+  assert.throws(() => env.call('refresh'), /refresh failed: monday_http_500/);
+  assert.equal(env.cache.raw(), before);
+  assert.equal(env.lockReleases, env.lockAcquisitions);
 });
 
-test('setup: names the missing properties, then creates the trigger once and runs refresh', () => {
-  const empty = createGasEnv({ props: {} });
-  assert.throws(() => empty.call('setup'), (err) => /MONDAY_API_TOKEN/.test(err.message) && /STATUS_LINK_COLUMN_ID/.test(err.message) && /SITE_URL/.test(err.message));
+test('SITE_URL gets a trailing slash unless it ends in .html', () => {
+  const { env } = setupEnv();
+  assert.equal(env.call('normaliseSiteUrl_', 'https://x.example/fa-status'), 'https://x.example/fa-status/');
+  assert.equal(env.call('normaliseSiteUrl_', 'https://x.example/'), 'https://x.example/');
+  assert.equal(env.call('normaliseSiteUrl_', 'https://x.example/index.html'), 'https://x.example/index.html');
+  const props = setupEnv(fixture(), { SITE_URL: 'http://insecure.example' });
+  assert.equal(props.env.call('refresh'), undefined);
+  assert.ok(props.env.logText().indexOf('SITE_URL must be an https://') !== -1);
+});
 
-  const emailOn = setup({ fa: emptyRows(1), props: { SEND_LINK_EMAIL: 'true' } });
-  assert.throws(() => emailOn.env.call('setup'), /EMAIL_NEW_ROWS_FROM/);
-
-  const { env } = setup({ fa: emptyRows(2) });
-  const stats = env.call('setup');
+test('setup: creates the secret and the trigger once, checks the boards, runs refresh', () => {
+  const { env } = setupEnv(fixture(), { LINK_SECRET: undefined });
+  delete env.props.LINK_SECRET;
   env.call('setup');
+  const secret = env.props.LINK_SECRET;
+  assert.match(secret, /^[0-9a-f]{64}$/);
+  assert.deepEqual(env.triggers, [{ handler: 'refresh', minutes: 10 }]);
+  assert.ok(appsOf(env, 'alice@harbor.example'));
+  const line = JSON.parse(env.logs.find((l) => l.text.indexOf('"mode":"setup"') !== -1).text);
+  assert.equal(line.secretCreated, true);
+  assert.equal(line.mailQuota, 100);
+  assert.equal(line.addresses, ADDRESSES.length);
+  assert.equal(line.dvpMatched, 3);
+
+  env.call('setup');
+  assert.equal(env.props.LINK_SECRET, secret, 'never replaced');
   assert.equal(env.triggers.length, 1);
-  assert.deepEqual(env.triggers[0], { handler: 'refresh', minutes: 10 });
-  assert.equal(stats.linksWritten, 2);
 });
 
-test('setup refuses a Status link column that is not a Link column', () => {
-  const { env } = setup({ fa: emptyRows(1), props: { STATUS_LINK_COLUMN_ID: 'text_somethingelse' } });
-  assert.throws(() => env.call('setup'), /not a Link column|does not name a column/);
+test('setup: refuses incomplete settings (names only) and a board without email columns', () => {
+  const missing = setupEnv(fixture(), { SITE_URL: '' });
+  assert.throws(() => missing.env.call('setup'), (err) => /SITE_URL is not set/.test(err.message) && err.message.indexOf('test-token-xyz') === -1);
+  assert.equal(missing.env.triggers.length, 0);
+
+  const noEmail = setupEnv(Object.assign(fixture(), { missingColumns: EMAIL_COLUMNS }));
+  assert.throws(() => noEmail.env.call('setup'), /neither email column/);
+
+  const oneMissing = setupEnv(Object.assign(fixture(), { missingColumns: ['link_mm6hfp5g'] }));
+  oneMissing.env.call('setup');
+  const line = JSON.parse(oneMissing.env.logs.find((l) => l.text.indexOf('"mode":"setup"') !== -1).text);
+  assert.deepEqual(line.missingColumns, { fa: ['link_mm6hfp5g'], dvp: [] });
+
+  const unreadable = setupEnv();
+  unreadable.monday.failNext = [{ code: 401, body: '{"errors":[{"message":"Not Authenticated"}]}' }];
+  assert.throws(() => unreadable.env.call('setup'), /Could not read the FA board \(monday_unauthorized\)/);
+});
+
+test('the DVP board id is read from DVP_BOARD_ID when set', () => {
+  const data = fixture();
+  const monday = createFakeMonday(data);
+  monday.boards['777'] = monday.boards[DVP];
+  delete monday.boards[DVP];
+  const env = createGasEnv({ props: Object.assign({}, PROPS, { DVP_BOARD_ID: '777' }), fetch: monday.handle });
+  assert.equal(env.call('refresh').dvpRows, 4);
 });

@@ -5,128 +5,111 @@
  *
  * WHAT THIS IS
  * ------------
- * Every Featured App (FA) application gets a private link of the form
+ * A public status page (docs/, on GitHub Pages) where Featured App applicants
+ * see where their own FA applications and DVP requests stand, and nobody
+ * else's. This script is the only part that talks to Monday. It only READS the
+ * two boards: nothing is added to them and nothing is ever written to them.
  *
- *     https://status.<domain>/#<code>
+ * How an applicant gets in:
+ *   1. On the page, they type the email address they applied with.
+ *   2. If that address is on an FA application, this script emails it a
+ *      private link:   https://<site>/#<token>
+ *   3. The link shows every FA application that lists the address (in the
+ *      "Email" column or in "Emails for Responsible Persons"), each with the
+ *      DVP requests that belong to it.
  *
- * The page behind that address is a static site on GitHub Pages (docs/). It is
- * the same for everyone and holds no applicant data and no secrets. This script
- * is the only part that talks to Monday (it holds the API token). It has two
- * jobs:
+ * The token is an HMAC of the email address keyed with a secret (the
+ * LINK_SECRET property), cut to 22 base64url characters (132 bits). It can't
+ * be guessed, nothing has to be stored per applicant, and the same address
+ * always gets the same link. Changing LINK_SECRET changes every link at once.
  *
- *   1. answer one link at a time for the page          -> doGet(e)
- *   2. every 10 minutes, give new FA rows a link and
- *      rebuild the cache the page is answered from     -> refresh()
+ * THREE ENTRY POINTS
+ * ------------------
+ *   doPost(e)   the page's form: "email me my link"
+ *   doGet(e)    the page asks for one token's applications
+ *   refresh()   every 10 minutes: read both boards, rebuild the cache
  *
- * FLOW 1: A PAGE VIEW (browser -> doGet)
- * --------------------------------------
- *   The browser opens https://status.<domain>/#<code>.
- *     -> status.js reads <code> from location.hash. (Browsers never send the
- *        part after '#' to GitHub.)
- *     -> status.js calls GET <this web app's /exec URL>?link=<code>.
- *     -> doGet(e):
- *          a. Checks the code's format (22 base64url characters). A bad format
- *             gets {"found": false} straight away, without touching the cache.
- *          b. Reads ONE cache shard: the one for the code's first character.
- *          c. If the shard is there, answers {"found": true, "app": {...}} or
- *             {"found": false}.
- *          d. If the shard is missing (expired or evicted), takes the script
- *             lock and reads the shard again, since another request may have
- *             refilled it. If it is still missing, rebuilds the cache from
- *             Monday in READ-ONLY mode (no codes issued, nothing written to
- *             Monday) and answers from the result.
- *          e. Any failure: {"error": "unavailable"} and nothing else.
+ * FLOW 1: REQUESTING A LINK (page form -> doPost)
+ *   The page POSTs {"email": "..."} as text/plain (a CORS "simple" request).
+ *     a. A malformed address gets {"ok": false, "error": "invalid_email"}.
+ *     b. Otherwise: token = HMAC(LINK_SECRET, address). If the cache has
+ *        applications for that token, the link is emailed (with a 15-minute
+ *        cooldown and at most 3 emails per address per 6 hours).
+ *     c. The answer is {"ok": true} either way, so the form can't be used to
+ *        find out whether an address applied.
  *
- * FLOW 2: THE 10-MINUTE JOB (time-driven trigger -> refresh)
- * ----------------------------------------------------------
- *   refresh():
- *     1. Takes the script lock so two runs never overlap.
- *     2. Reads the Script Properties (below) and stops if they are incomplete.
- *     3. Reads the FA board: only the allow-listed columns, plus Status link
- *        and Send Email. In phase 2 it also reads the DVP board.
- *     4. For every FA row whose Status link cell is EMPTY, it makes a new code
- *        and writes {url: SITE_URL + "#" + code, text: "Status link"} back to
- *        Monday: at most 200 rows per run, 20 writes per request. For new rows
- *        it can also set Send Email to "Status link" in the same write, so a
- *        Monday automation emails the link (see chooseEmailRows_).
- *     5. Builds the applicant views (allow-listed fields only) for every row
- *        whose code is valid, unique and saved in Monday.
- *     6. Writes all 64 cache shards in one call, with a 6-hour expiry.
- *     7. Logs ONE JSON line of counts. Never codes, names, URLs or Monday
- *        error messages.
+ * FLOW 2: OPENING A LINK (page -> doGet)
+ *   The page reads the token from location.hash (browsers never send the part
+ *   after "#" to GitHub) and calls GET <exec URL>?link=<token>.
+ *     a. A malformed token gets {"found": false} without touching the cache.
+ *     b. Otherwise it reads ONE cache shard (the one for the token's first
+ *        character) and answers {"found": true, "apps": [...]} or
+ *        {"found": false}.
+ *     c. If the shard is missing (expired or evicted), it rebuilds the cache
+ *        from Monday under the script lock and answers from the result.
+ *     d. Any failure: {"error": "unavailable"} and nothing else.
+ *
+ * FLOW 3: THE 10-MINUTE JOB (time-driven trigger -> refresh)
+ *     1. Reads the FA board: the allow-listed columns plus the two email
+ *        columns (used to decide who may see a row; never sent anywhere).
+ *     2. Reads the DVP board and attaches each request to the FA app(s) with
+ *        the same name (see matchDvpToApps_).
+ *     3. Builds, for every email address found on the FA board, the list of
+ *        that address's applications (allow-listed fields only).
+ *     4. Writes all 64 cache shards in one call (6-hour expiry).
+ *     5. Logs ONE JSON line of counts. Never addresses, tokens or names.
  *
  * SCRIPT PROPERTIES (Project Settings -> Script Properties)
  * ---------------------------------------------------------
- *   MONDAY_API_TOKEN       Required. API token of the Monday account the
- *                          script uses. Never logged, never returned.
- *   STATUS_LINK_COLUMN_ID  Required. Id of the "Status link" Link column on the
- *                          FA board, e.g. link_mm95vm0.
- *   SITE_URL               Required. The page's https address, e.g.
- *                          https://status.example.org. A trailing "/" is added
- *                          unless it ends in ".html".
- *   SEND_LINK_EMAIL        Optional. Exactly "true" switches the automatic email
- *                          on; anything else, or unset, means off. Keep it off
- *                          until the Gmail automation on "Send Email = Status
- *                          link" exists.
- *   EMAIL_NEW_ROWS_FROM    Needed when SEND_LINK_EMAIL is "true". An ISO date
- *                          such as 2026-12-01. Only rows created on or after it
- *                          get the automatic email; the team sends older rows
- *                          their link by hand.
- *   FA_BOARD_ID            Optional. Defaults to the production FA board. Point
- *                          it at the sandbox copy for testing.
- *   DVP_BOARD_ID           Optional. Defaults to the production DVP board.
- *   DVP_LINK_COLUMN_ID     Optional (phase 2). Id of the Connect boards column
- *                          on the DVP board that points at FA rows. While it is
- *                          unset, the DVP board is not read and "dvp" is [].
+ *   MONDAY_API_TOKEN  Required. A Monday API token from an account that can
+ *                     see both boards. Never logged, never returned.
+ *   SITE_URL          Required. The page's https address, e.g.
+ *                     https://pedrodneves.github.io/fa-status/ . Used to build
+ *                     the link in the email.
+ *   LINK_SECRET       Created by setup(). Leave it alone: changing or deleting
+ *                     it (then running setup again) changes every link.
+ *   FA_BOARD_ID       Optional. Defaults to the production FA board.
+ *   DVP_BOARD_ID      Optional. Defaults to the production DVP board.
  *
  * SETUP (once)
  * ------------
  *   1. script.google.com -> New project. Paste this file into Code.gs. In
  *      Project Settings, tick "Show appsscript.json manifest file in editor",
- *      then replace that file with apps-script/appsscript.json.
- *   2. Project Settings -> Script Properties: add the properties above.
- *   3. In the editor, pick "setup" in the function menu and press Run. Approve
- *      the two permissions (external requests and triggers). setup() checks
- *      the properties, checks the columns on Monday, creates the 10-minute
- *      trigger (only once) and runs refresh().
- *   4. Deploy -> New deployment -> Web app. Execute as: Me (the shared ops
- *      account). Who has access: Anyone. Put the /exec URL in docs/config.js
- *      (apiUrl).
- *   5. After any code change: Deploy -> Manage deployments -> Edit -> Version:
- *      New version. The trigger always runs the latest saved code, but the web
- *      app runs the deployed version.
- *
- * DESIGN NOTES
- * ------------
- *   "Appendix A" and "Appendix B #n" in the comments below refer to DESIGN.md
- *   in the repo: A lists the Monday API facts verified on a sandbox board,
- *   B the decisions made while building.
+ *      and replace that file with apps-script/appsscript.json.
+ *   2. Project Settings -> Script Properties: add MONDAY_API_TOKEN and SITE_URL.
+ *   3. Pick "setup" in the function menu and press Run. Approve the
+ *      permissions (connect to Monday, send email, run on a schedule).
+ *   4. Deploy -> New deployment -> Web app. Execute as: Me. Who has access:
+ *      Anyone. Put the /exec URL in docs/config.js (apiUrl).
+ *   5. After any code change: Deploy -> Manage deployments -> Edit ->
+ *      Version: New version (the URL stays the same).
  *
  * PRIVACY RULES THIS FILE FOLLOWS
  * -------------------------------
- *   - Only allow-listed columns are requested from Monday, and the page's
- *     answer is built field by field in toApplicantView(), so nothing else can
- *     leak.
- *   - Logs carry counts, unknown board labels and Monday error codes only.
- *   - The browser only ever sees {"found": ...} or {"error": "unavailable"}.
+ *   - Only allow-listed columns (plus the two email columns) are requested
+ *     from Monday, and the answer is built field by field in
+ *     toApplicantView(), so nothing else can leak.
+ *   - Email addresses are only used to compute tokens and to send the link to
+ *     that same address. They are never cached, logged or returned.
+ *   - Logs carry counts, unknown board labels and short error kinds only.
  *
  * APPS SCRIPT NOTES FOR NEWCOMERS
  * -------------------------------
- *   - doGet(e) is the function Apps Script calls for each GET on the web app.
- *   - The services used here are global objects provided by Apps Script:
- *     PropertiesService (settings), CacheService (a shared key/value cache),
- *     LockService (a script-wide mutex), UrlFetchApp (HTTP), Utilities
- *     (hashing, base64, sleep), ContentService (HTTP responses) and ScriptApp
- *     (triggers).
+ *   - doGet(e) / doPost(e) are called by Apps Script for each GET / POST on
+ *     the web app. refresh() is called by a time-driven trigger.
+ *   - The services used here are globals provided by Apps Script:
+ *     PropertiesService (settings), CacheService (shared key/value cache),
+ *     LockService (a script-wide mutex), UrlFetchApp (HTTP), MailApp (email),
+ *     Utilities (HMAC, base64, sleep), ContentService (HTTP responses) and
+ *     ScriptApp (triggers).
  *   - Functions whose names end in "_" are private: they are hidden from the
- *     editor's Run menu and cannot be called from outside.
- *   - This file has no top-level side effects (only constants and functions),
- *     so the Node tests can load it in a vm context with mocked services. The
- *     syntax stays at ES2017.
+ *     editor's Run menu and can't be called from outside.
+ *   - The file has no top-level side effects (only constants and functions),
+ *     so the Node tests can load it with mocked services.
  */
 
 // =============================================================================
-// 2. Constants
+// 1. Constants
 // =============================================================================
 
 // -----------------------------------------------------------------------------
@@ -139,34 +122,36 @@ const DEFAULT_FA_BOARD_ID = '18420896395';
 /** Production DVP board, "Asset Moving Status Requests". Override with DVP_BOARD_ID. */
 const DEFAULT_DVP_BOARD_ID = '18436778970';
 
-/**
- * FA board columns the portal reads: the allow-list, plus Send Email.
- * STATUS_LINK_COLUMN_ID is added at run time. Nothing else is ever requested.
- */
+/** FA board columns that may be shown to the applicant (the allow-list). */
 const FA_COLUMNS = {
-  institution: 'text_mm4k2vch',     // Institution (text)
+  institution: 'text_mm4k2vch',     // Name of Applying Institution (text)
   status: 'color_mm4kmej3',         // FA Status (status), mapped to a state key
   type: 'color_mm4kpp3q',           // Type (status): Non-Issuer / Asset Issuer
   submitted: 'date_mm4kw11a',       // "Time stamp" (date)
-  lockVerified: 'date_mm4kpckv',    // Lock verified (date)
-  lockedAmount: 'numeric_mm4k6919', // Locked amount (numbers), millions of CC
+  lockVerified: 'date_mm4kpckv',    // Lock Verified (date)
+  lockedAmount: 'numeric_mm4k6919', // Locked amount (Million) (numbers)
   testing: 'color_mm6be9ge',        // Testing Process (status)
-  partyId: 'long_text_mm4kq322',    // Party ID (long text)
-  website: 'link_mm4kmq24',         // Product site (link)
-  announcement: 'link_mm6hfp5g',    // "FA Link" (link): sent only when approved
-  sendEmail: 'color_mm6eay19'       // Send Email (status): email rule only, never sent to the page
+  partyId: 'long_text_mm4kq322',    // Party ID for the Featured Application (long text)
+  website: 'link_mm4kmq24',         // Product Website (link)
+  announcement: 'link_mm6hfp5g'     // "FA Link" (link): shown only once approved
 };
 
-/** DVP board columns the portal reads. DVP_LINK_COLUMN_ID is added at run time. */
+/**
+ * FA board columns that decide WHO may see a row. They are read, but never
+ * cached, logged or sent to the page.
+ */
+const FA_EMAIL_COLUMNS = {
+  email: 'email_mm4ke170',     // Email (email column)
+  responsible: 'text_mm4kvrar' // Emails for Responsible Persons (free text, often several)
+};
+
+/** DVP board columns that may be shown. The board has no email column. */
 const DVP_COLUMNS = {
   submitted: 'date_mm8dsx4y',     // Submission Date
   finalApproval: 'date_mm8dm7a0', // Final Approval Date
-  requestLink: 'link_mm8rp25j',   // Request Link
+  requestLink: 'link_mm8rp25j',   // Request Link (post on the accountability list)
   status: 'color_mm8dhgvr'        // Status
 };
-
-/** Extra GraphQL selection for the DVP read: how Connect boards cells expose linked item ids. */
-const DVP_RELATION_FRAGMENT = '... on BoardRelationValue { linked_item_ids }';
 
 // -----------------------------------------------------------------------------
 // Monday API
@@ -179,19 +164,28 @@ const MONDAY_API_VERSION = '2026-10';
 // Limits
 // -----------------------------------------------------------------------------
 
-const WRITE_CAP_PER_RUN = 200;         // link writes per run; the backfill spreads over runs
-const BATCH_SIZE = 20;                 // aliased mutations per request
-const EMAIL_BRAKE = 20;                // more qualifying rows than this in one run: no email labels at all
-const PAGE_LIMIT = 500;                // items per items_page / next_items_page call (Monday's maximum)
-const MAX_PAGES = 50;                  // pagination safety stop (25,000 items)
-const MAX_RETRIES = 2;                 // retries per request on HTTP 429 or 5xx
-const RETRY_AFTER_MAX_S = 10;          // longest Retry-After honoured, in seconds
-const CACHE_TTL_S = 21600;             // 6 hours, CacheService's maximum
-const CACHE_PREFIX = 'fa1:';           // cache key prefix; changing it orphans every old shard
-const CACHE_VALUE_MAX_BYTES = 100000;  // CacheService allows 100 KB per value
-const LOCK_WAIT_MS = 20000;            // doGet waits this long for the lock on a cache miss
-const REFRESH_LOCK_WAIT_MS = 5000;     // refresh gives up quickly: the next run is 10 minutes away
-const CODE_ATTEMPTS = 5;               // newCode_ tries this many times to avoid a taken code
+const PAGE_LIMIT = 500;               // items per items_page / next_items_page call (Monday's maximum)
+const MAX_PAGES = 50;                 // pagination safety stop (25,000 items)
+const MAX_RETRIES = 2;                // retries per request on HTTP 429 or 5xx
+const RETRY_AFTER_MAX_S = 10;         // longest Retry-After honoured, in seconds
+const CACHE_TTL_S = 21600;            // 6 hours, CacheService's maximum
+const CACHE_PREFIX = 'fa2:';          // cache key prefix; changing it orphans every old shard
+const CACHE_VALUE_MAX_BYTES = 100000; // CacheService allows 100 KB per value
+const LOCK_WAIT_MS = 20000;           // a request waits this long for the lock on a cache miss
+const REFRESH_LOCK_WAIT_MS = 5000;    // refresh gives up quickly: the next run is 10 minutes away
+
+// Link emails.
+const MAIL_KEY_PREFIX = CACHE_PREFIX + 'mail:'; // + token: when this address was last emailed
+const MAIL_COOLDOWN_S = 900;          // at most one email per address every 15 minutes...
+const MAIL_WINDOW_S = 21600;          // ...and at most MAIL_MAX_PER_WINDOW per 6 hours
+const MAIL_MAX_PER_WINDOW = 3;
+const MAIL_QUOTA_RESERVE = 10;        // leave this much of the account's daily email quota unused
+const PAUSE_MIN_MS = 600;             // when no email is sent, wait about as long as sending takes,
+const PAUSE_SPREAD_MS = 800;          // so response times don't reveal whether an address applied
+
+// Email addresses.
+const EMAIL_MAX_LENGTH = 254;
+const EMAILS_PER_ROW_MAX = 10;        // ignore anything past this in one row's cells
 
 // Text caps for the applicant view.
 const NAME_MAX = 200;        // app name, DVP request name
@@ -202,11 +196,21 @@ const URL_MAX = 2000;        // website, announcement, DVP request link
 const LOG_LABEL_MAX = 60;    // unknown labels as written to the log
 
 // -----------------------------------------------------------------------------
-// Labels -> state keys (all wording lives in docs/status.js)
+// The email that carries the link (the page's wording lives in docs/status.js)
 // -----------------------------------------------------------------------------
 
-/** The Status link's link text, and the Send Email label that triggers the email. */
-const STATUS_LINK_TEXT = 'Status link';
+const LINK_EMAIL = {
+  senderName: 'Featured App Status',
+  subject: 'Your Featured App status link',
+  intro: 'Here is your private link to the status of your Featured App applications and DVP requests:',
+  button: 'View my application status',
+  keep: 'Anyone with this link can see these statuses, so keep it within your team. The link stays the same, so you can bookmark it.',
+  why: "You're receiving this because this address was entered on the Featured App Status page. If that wasn't you, you can ignore this email."
+};
+
+// -----------------------------------------------------------------------------
+// Labels -> state keys (all wording lives in docs/status.js)
+// -----------------------------------------------------------------------------
 
 /** FA Status label -> state. Empty: FA_STATE_EMPTY. Any other label: FA_STATE_UNKNOWN (logged). */
 const FA_STATE_BY_LABEL = {
@@ -233,7 +237,7 @@ const TESTING_STATE_BY_LABEL = {
 const TESTING_STATE_EMPTY = 'not_started';
 const TESTING_STATE_UNKNOWN = 'in_progress';
 
-/** DVP Status label -> state. The board's label really is spelled "Apporval"; both spellings are accepted. */
+/** DVP Status label -> state. The board's label really is spelled "Apporval"; both spellings work. */
 const DVP_STATE_BY_LABEL = {
   'New Submission': 'in_review',
   'FAAC Approval': 'with_tokenomics',
@@ -246,18 +250,32 @@ const DVP_STATE_EMPTY = 'in_review';
 const DVP_STATE_UNKNOWN = 'in_review';
 
 // -----------------------------------------------------------------------------
-// Codes and formats
+// Formats
 // -----------------------------------------------------------------------------
 
-/** A status code: 22 base64url characters (about 132 random bits). */
-const CODE_RE = /^[A-Za-z0-9_-]{22}$/;
-const CODE_LENGTH = 22;
+/** A link token: 22 base64url characters (132 bits of an HMAC-SHA256). */
+const TOKEN_RE = /^[A-Za-z0-9_-]{22}$/;
+const TOKEN_LENGTH = 22;
 
-/** The 64 base64url characters. A code's first character picks its cache shard. */
+/** The 64 base64url characters. A token's first character picks its cache shard. */
 const BASE64URL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
-/** Monday column ids (e.g. link_mm95vm0) and board ids (digits). */
-const COLUMN_ID_RE = /^[A-Za-z0-9_]{1,100}$/;
+/** LINK_SECRET must be at least this long (setup() makes a 64-character one). */
+const SECRET_MIN_LENGTH = 32;
+
+/** Email addresses: finding them inside a cell's text, and checking a typed one. */
+const EMAIL_FIND_RE = /[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+const EMAIL_INPUT_RE = /^[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+/**
+ * Where an app name stops and its qualifier starts, for DVP matching:
+ * " (" or " [", a spaced dash (" - ", " – ", " — "), or ": ".
+ * "Harbor Swap (RFQ request)" -> "harbor swap"; "Copperleaf - Copperleaf Labs" -> "copperleaf".
+ */
+const NAME_CUT_RE = /\s+[(\[]|\s+[-–—]\s+|:\s/;
+const MATCH_KEY_MIN = 2; // ignore name keys shorter than this
+
+/** Board ids (digits). */
 const BOARD_ID_RE = /^[0-9]{1,20}$/;
 
 /** SITE_URL after normalisation: https, a host, an optional path, no query or fragment. */
@@ -275,34 +293,30 @@ const ISO_DATETIME_RE = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)(?:\.(\
 const REQUEST_REF_URL_RE = /\/message\/(\d{1,20})/;
 const REQUEST_REF_TEXT_RE = /^\s*#(\d{1,20})/;
 
-/** Monday error codes that mean "rate or complexity limit reached: stop for this run". */
+/** Monday error codes that mean "rate or complexity limit reached". */
 const RATE_LIMIT_CODE_RE = /rate.?limit|complexity|budget|concurrency|daily.?limit/i;
 
 /** The "event" field on every log line, to filter the logs. */
 const LOG_EVENT = 'fa-status';
 
 // =============================================================================
-// 3. Entry points
+// 2. Entry points
 // =============================================================================
 
 /**
- * Web app entry point: answers one status link for the page.
+ * Web app GET: answers one link for the page.
  *
- * Checks the code's format, looks it up in the cache (rebuilding the cache
- * read-only on a miss, see lookupCode_) and replies with JSON. Error details
- * never reach the browser: any failure becomes {"error": "unavailable"}.
- *
- * @param {Object=} e The request event. It is undefined when the function is
- *     run from the editor. e.parameter.link carries the code.
- * @return {TextOutput} JSON: {found: true, app}, {found: false} or
+ * @param {Object=} e The request event (undefined when run from the editor).
+ *     e.parameter.link carries the token.
+ * @return {TextOutput} JSON: {found: true, apps: [...]}, {found: false} or
  *     {error: 'unavailable'}.
  */
 function doGet(e) {
   let body;
   try {
-    const code = e && e.parameter && typeof e.parameter.link === 'string' ? e.parameter.link : '';
-    // A malformed code can never be in the cache, so answer without touching it.
-    body = CODE_RE.test(code) ? lookupCode_(code) : { found: false };
+    const token = e && e.parameter && typeof e.parameter.link === 'string' ? e.parameter.link : '';
+    // A malformed token can never be in the cache, so answer without touching it.
+    body = TOKEN_RE.test(token) ? lookup_(token) : { found: false };
   } catch (err) {
     console.error(JSON.stringify({ event: LOG_EVENT, mode: 'doGet', error: errorKind_(err) }));
     body = { error: 'unavailable' };
@@ -311,16 +325,40 @@ function doGet(e) {
 }
 
 /**
- * The 10-minute job: issues links for FA rows that have none, then rebuilds
- * the cache. Runs from the time-driven trigger that setup() creates.
+ * Web app POST: the page's "email me my link" form.
  *
- * If Monday cannot be read or the cache cannot be written, the run logs its
+ * The answer is the same whether or not the address is on an application, so
+ * the form can't be used to test addresses. Error details never reach the
+ * browser.
+ *
+ * @param {Object=} e The request event. e.postData.contents is the JSON text
+ *     {"email": "..."}; a form-encoded email=... works too.
+ * @return {TextOutput} JSON: {ok: true}, {ok: false, error: 'invalid_email'}
+ *     or {ok: false, error: 'unavailable'}.
+ */
+function doPost(e) {
+  let body;
+  try {
+    const email = normaliseEmail_(emailFromRequest_(e));
+    body = email ? requestLink_(email) : { ok: false, error: 'invalid_email' };
+  } catch (err) {
+    console.error(JSON.stringify({ event: LOG_EVENT, mode: 'doPost', error: errorKind_(err) }));
+    body = { ok: false, error: 'unavailable' };
+  }
+  return jsonOutput_(body);
+}
+
+/**
+ * The 10-minute job: reads both boards and rebuilds the cache. Runs from the
+ * time-driven trigger that setup() creates.
+ *
+ * If Monday can't be read or the cache can't be written, the run logs its
  * counts with a short error kind and throws a data-free Error, so the
- * execution shows as failed. The previous cache is then left as it was.
+ * execution shows as failed. The previous cache then stays as it was.
  *
- * @return {Object|undefined} The run's stats (counts only; see newStats_), or
- *     undefined when the run was skipped because another run holds the lock
- *     or the Script Properties are incomplete.
+ * @return {Object|undefined} The run's stats (counts only), or undefined when
+ *     the run was skipped (another run holds the lock, or the Script
+ *     Properties are incomplete).
  */
 function refresh() {
   const lock = LockService.getScriptLock();
@@ -328,29 +366,12 @@ function refresh() {
     console.log(JSON.stringify({ event: LOG_EVENT, mode: 'refresh', skipped: 'lock_busy' }));
     return;
   }
-  const started = Date.now();
-  const stats = newStats_('refresh');
   try {
-    const cfg = readConfig_();
-    const problems = validateConfig_(cfg);
-    if (problems.length) {
-      // Problems name properties, never their values, so they are safe to log.
-      console.error(JSON.stringify({ event: LOG_EVENT, mode: 'refresh', error: 'config_invalid', problems: problems }));
-      return;
-    }
-    const built = buildFromMonday_(cfg, { write: true, stats: stats });
-    stats.stage = 'write_cache';
-    stats.cacheLargestShard = writeCache_(built.views);
-    stats.stage = 'done';
-    stats.ms = Date.now() - started;
-    logRun_(stats);
-    return stats;
+    const result = rebuild_('refresh');
+    return result ? result.stats : undefined;
   } catch (err) {
-    stats.ms = Date.now() - started;
-    const kind = errorKind_(err);
-    logRun_(stats, kind);
     // A fresh Error, so no message from Monday or the runtime ends up in the logs.
-    throw new Error('refresh failed: ' + kind);
+    throw new Error('refresh failed: ' + errorKind_(err));
   } finally {
     lock.releaseLock();
   }
@@ -358,117 +379,91 @@ function refresh() {
 
 /**
  * One-time setup, run by hand from the editor. It:
- *   1. checks the Script Properties;
- *   2. checks on Monday that STATUS_LINK_COLUMN_ID is a Link column on the FA
- *      board, that DVP_LINK_COLUMN_ID (if set) is a Connect boards column on
- *      the DVP board, and, if SEND_LINK_EMAIL is "true", that Send Email has
- *      an active "Status link" label;
- *   3. creates the 10-minute trigger for refresh(), unless one exists;
- *   4. runs refresh() and logs a summary.
+ *   1. creates LINK_SECRET if it doesn't exist yet (never replaces one);
+ *   2. checks the Script Properties;
+ *   3. checks that both boards can be read and have the expected columns;
+ *   4. reads the remaining email quota (this is also what makes Google ask
+ *      for the "send email" permission now, not on the first request);
+ *   5. creates the 10-minute trigger for refresh(), unless one exists;
+ *   6. runs refresh() and logs a summary.
  * Safe to run again at any time.
  *
- * @return {Object|undefined} The stats of the refresh() it ran, or undefined
- *     if that run was skipped.
+ * @return {Object|undefined} The stats of the refresh() it ran.
  * @throws {Error} Listing what to fix (property names, never values).
  */
 function setup() {
+  const secretCreated = ensureSecret_();
   const cfg = readConfig_();
-  const problems = validateConfig_(cfg).concat(emailConfigProblems_(cfg));
+  const problems = validateConfig_(cfg);
   if (problems.length) {
     throw new Error('Fix these Script Properties, then run setup again: ' + problems.join('; '));
   }
-  const check = checkMondaySetup_(cfg);
-  if (check.problems.length) {
-    throw new Error('Fix these, then run setup again: ' + check.problems.join('; '));
-  }
+  const missing = checkColumns_(cfg);
+  const mailQuota = MailApp.getRemainingDailyQuota();
   const triggerCreated = ensureRefreshTrigger_();
   const stats = refresh();
   console.log(JSON.stringify({
     event: LOG_EVENT,
     mode: 'setup',
+    secretCreated: secretCreated,
     triggerCreated: triggerCreated,
-    emailOn: cfg.sendLinkEmail,
-    dvpOn: cfg.dvpLinkColumnId !== '',
-    missingColumns: check.missingColumns, // column ids only: warnings, not errors
+    missingColumns: missing, // column ids only: those fields will read as empty
+    mailQuota: mailQuota,
     refreshed: Boolean(stats),
     faRows: stats ? stats.faRows : 0,
-    served: stats ? stats.served : 0,
-    linksWritten: stats ? stats.linksWritten : 0
+    addresses: stats ? stats.addresses : 0,
+    dvpMatched: stats ? stats.dvpMatched : 0,
+    dvpUnmatched: stats ? stats.dvpUnmatched : 0
   }));
   return stats;
 }
 
-// -----------------------------------------------------------------------------
-// Entry-point helpers
-// -----------------------------------------------------------------------------
+// =============================================================================
+// 3. Answering the page
+// =============================================================================
 
 /**
- * Looks one code up in the cache. On a miss (Appendix B #9): takes the script
- * lock, reads the shard again, and if it is still missing rebuilds the cache
- * from Monday in read-only mode. Without the lock it reads the shard once
- * more and otherwise gives up.
+ * Looks one token up in the cache. On a miss: takes the script lock, reads the
+ * shard again (another request may have refilled it), and if it is still
+ * missing rebuilds the cache from Monday. Without the lock it reads the shard
+ * once more and otherwise gives up.
  *
- * @param {string} code A code that already matched CODE_RE.
- * @return {Object} {found: true, app}, {found: false} or {error: 'unavailable'}.
+ * @param {string} token A token that already matched TOKEN_RE.
+ * @return {Object} {found: true, apps}, {found: false} or {error: 'unavailable'}.
  */
-function lookupCode_(code) {
-  const shard = readShard_(code);
-  if (shard) return answerFromMap_(shard, code);
+function lookup_(token) {
+  const shard = readShard_(token);
+  if (shard) return answerFor_(shard, token);
 
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(LOCK_WAIT_MS)) {
-    // Someone else (refresh, or another request) is busy; one more look, then give up.
-    const again = readShard_(code);
-    if (again) return answerFromMap_(again, code);
-    console.error(JSON.stringify({ event: LOG_EVENT, mode: 'doGet', error: 'lock_busy' }));
+    const again = readShard_(token);
+    if (again) return answerFor_(again, token);
+    console.error(JSON.stringify({ event: LOG_EVENT, mode: 'lookup', error: 'lock_busy' }));
     return { error: 'unavailable' };
   }
   try {
-    const filled = readShard_(code);
-    if (filled) return answerFromMap_(filled, code);
-    const views = rebuildReadOnly_();
-    return views ? answerFromMap_(views, code) : { error: 'unavailable' };
+    const filled = readShard_(token);
+    if (filled) return answerFor_(filled, token);
+    const result = rebuild_('rebuild');
+    return result ? answerFor_(result.views, token) : { error: 'unavailable' };
   } finally {
     lock.releaseLock();
   }
 }
 
 /**
- * Rebuilds the whole cache from Monday without writing anything to Monday:
- * no codes are issued, no links or labels are written. Rows without a saved
- * code are simply not served. The caller must hold the script lock.
+ * The answer for one token from a map of token -> entry (a cache shard, or
+ * the views of a rebuild).
  *
- * @return {?Object<string, Object>} The views (code -> app), or null when the
- *     Script Properties are incomplete.
+ * @param {Object<string, {apps: Array<Object>}>} map Token -> entry.
+ * @param {string} token The token asked for.
+ * @return {Object} {found: true, apps} or {found: false}.
  */
-function rebuildReadOnly_() {
-  const started = Date.now();
-  const cfg = readConfig_();
-  const problems = validateConfig_(cfg);
-  if (problems.length) {
-    console.error(JSON.stringify({ event: LOG_EVENT, mode: 'rebuild', error: 'config_invalid', problems: problems }));
-    return null;
-  }
-  const stats = newStats_('rebuild');
-  const built = buildFromMonday_(cfg, { write: false, stats: stats });
-  stats.cacheLargestShard = writeCache_(built.views);
-  stats.stage = 'done';
-  stats.ms = Date.now() - started;
-  logRun_(stats);
-  return built.views;
-}
-
-/**
- * Builds the answer for one code from a map of code -> app (a cache shard,
- * or the views of a rebuild).
- *
- * @param {Object<string, Object>} map Code -> app object.
- * @param {string} code The code asked for.
- * @return {Object} {found: true, app} or {found: false}.
- */
-function answerFromMap_(map, code) {
-  const app = hasOwn_(map, code) ? map[code] : null;
-  return app && typeof app === 'object' ? { found: true, app: app } : { found: false };
+function answerFor_(map, token) {
+  const entry = hasOwn_(map, token) ? map[token] : null;
+  const apps = entry && Array.isArray(entry.apps) ? entry.apps : [];
+  return apps.length ? { found: true, apps: apps } : { found: false };
 }
 
 /**
@@ -481,51 +476,296 @@ function jsonOutput_(body) {
   return ContentService.createTextOutput(JSON.stringify(body)).setMimeType(ContentService.MimeType.JSON);
 }
 
+// =============================================================================
+// 4. Emailing the link
+// =============================================================================
+
 /**
- * setup() helper: checks the configured columns on Monday.
+ * Reads the email address from a POST: the JSON body {"email": "..."} the
+ * page sends, or a form-encoded email=... parameter.
+ *
+ * @param {Object=} e The request event.
+ * @return {string} The raw address ('' when there is none).
+ */
+function emailFromRequest_(e) {
+  const contents = e && e.postData && typeof e.postData.contents === 'string' ? e.postData.contents : '';
+  const parsed = contents.length <= 2000 ? parseJson_(contents) : null;
+  if (parsed && typeof parsed === 'object' && typeof parsed.email === 'string') return parsed.email;
+  return e && e.parameter && typeof e.parameter.email === 'string' ? e.parameter.email : '';
+}
+
+/**
+ * Handles a valid address: emails the link if the address is on an
+ * application and the limits allow it.
+ *
+ * @param {string} email A normalised address (see normaliseEmail_).
+ * @return {Object} {ok: true}, or {ok: false, error: 'unavailable'} when the
+ *     applications can't be looked up.
+ */
+function requestLink_(email) {
+  const cfg = readConfig_();
+  const problems = validateConfig_(cfg);
+  if (problems.length) {
+    console.error(JSON.stringify({ event: LOG_EVENT, mode: 'doPost', error: 'config_invalid', problems: problems }));
+    return { ok: false, error: 'unavailable' };
+  }
+  const token = tokenFor_(cfg.secret, email);
+  const answer = lookup_(token);
+  if (answer.error) return { ok: false, error: 'unavailable' };
+
+  const outcome = answer.found ? sendLink_(cfg, email, token) : 'not_found';
+  if (outcome !== 'sent') pause_();
+  return { ok: true };
+}
+
+/**
+ * Emails the link to one address, within the limits: one email per
+ * MAIL_COOLDOWN_S, MAIL_MAX_PER_WINDOW per MAIL_WINDOW_S, and never the last
+ * MAIL_QUOTA_RESERVE emails of the account's daily quota. The limits are kept
+ * in the cache under the token, so no address is stored.
  *
  * @param {Object} cfg Config from readConfig_().
- * @return {{problems: Array<string>, missingColumns: {fa: Array<string>, dvp: Array<string>}}}
- *     Problems that must be fixed, plus allow-listed column ids that were not
- *     found (warnings only: those fields will read as null).
+ * @param {string} email The address to send to.
+ * @param {string} token Its token.
+ * @return {string} 'sent', 'cooldown', 'window_full', 'quota_low' or 'mail_failed'.
  */
-function checkMondaySetup_(cfg) {
-  const problems = [];
-  const missingColumns = { fa: [], dvp: [] };
+function sendLink_(cfg, email, token) {
+  const cache = CacheService.getScriptCache();
+  const key = MAIL_KEY_PREFIX + token;
+  const now = Date.now();
+  const record = parseJson_(cache.get(key));
+  const inWindow = record && typeof record.first === 'number' && now - record.first < MAIL_WINDOW_S * 1000;
+  const first = inWindow ? record.first : now;
+  const count = inWindow && typeof record.count === 'number' ? record.count : 0;
 
-  let faColumns;
+  if (record && typeof record.last === 'number' && now - record.last < MAIL_COOLDOWN_S * 1000) return 'cooldown';
+  if (count >= MAIL_MAX_PER_WINDOW) return 'window_full';
+  if (MailApp.getRemainingDailyQuota() <= MAIL_QUOTA_RESERVE) {
+    console.error(JSON.stringify({ event: LOG_EVENT, mode: 'doPost', error: 'mail_quota_low' }));
+    return 'quota_low';
+  }
+
+  // Note the send first, so two quick requests can't both send.
+  cache.put(key, JSON.stringify({ first: first, count: count + 1, last: now }), MAIL_WINDOW_S);
+  const link = cfg.siteUrl + '#' + token;
   try {
-    faColumns = readColumns_(cfg, cfg.faBoardId, faReadColumnIds_(cfg));
+    MailApp.sendEmail({
+      to: email,
+      subject: LINK_EMAIL.subject,
+      body: linkEmailText_(link),
+      htmlBody: linkEmailHtml_(link),
+      name: LINK_EMAIL.senderName
+    });
   } catch (err) {
-    problems.push('could not read the FA board (' + errorKind_(err) + '): check MONDAY_API_TOKEN and FA_BOARD_ID');
-    return { problems: problems, missingColumns: missingColumns };
+    // The error message can quote the address, so only its kind is logged.
+    console.error(JSON.stringify({ event: LOG_EVENT, mode: 'doPost', error: 'mail_failed', kind: errorKind_(err) }));
+    return 'mail_failed';
   }
-  const linkColumn = findColumn_(faColumns, cfg.statusLinkColumnId);
-  if (!linkColumn) {
-    problems.push('STATUS_LINK_COLUMN_ID does not name a column on the FA board');
-  } else if (linkColumn.type !== 'link') {
-    problems.push('STATUS_LINK_COLUMN_ID names a column that is not a Link column');
-  }
-  if (cfg.sendLinkEmail && !hasActiveLabel_(findColumn_(faColumns, FA_COLUMNS.sendEmail), STATUS_LINK_TEXT)) {
-    problems.push('SEND_LINK_EMAIL is "true" but the Send Email column has no active "Status link" label');
-  }
-  missingColumns.fa = faReadColumnIds_(cfg).filter((id) => id !== cfg.statusLinkColumnId && !findColumn_(faColumns, id));
+  return 'sent';
+}
 
-  if (cfg.dvpLinkColumnId) {
-    try {
-      const dvpColumns = readColumns_(cfg, cfg.dvpBoardId, dvpReadColumnIds_(cfg));
-      const relation = findColumn_(dvpColumns, cfg.dvpLinkColumnId);
-      if (!relation) {
-        problems.push('DVP_LINK_COLUMN_ID does not name a column on the DVP board');
-      } else if (relation.type !== 'board_relation') {
-        problems.push('DVP_LINK_COLUMN_ID names a column that is not a Connect boards column');
-      }
-      missingColumns.dvp = dvpReadColumnIds_(cfg).filter((id) => id !== cfg.dvpLinkColumnId && !findColumn_(dvpColumns, id));
-    } catch (err) {
-      problems.push('could not read the DVP board (' + errorKind_(err) + '): check DVP_BOARD_ID');
-    }
+/**
+ * The plain-text body of the link email.
+ *
+ * @param {string} link The private link.
+ * @return {string} The text.
+ */
+function linkEmailText_(link) {
+  return [LINK_EMAIL.intro, '', link, '', LINK_EMAIL.keep, '', LINK_EMAIL.why].join('\n');
+}
+
+/**
+ * The HTML body of the link email: the same text, with a button. Email
+ * clients need inline styles.
+ *
+ * @param {string} link The private link.
+ * @return {string} The HTML.
+ */
+function linkEmailHtml_(link) {
+  const href = escapeHtml_(link);
+  return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#15202B">' +
+      '<p>' + escapeHtml_(LINK_EMAIL.intro) + '</p>' +
+      '<p><a href="' + href + '" style="display:inline-block;padding:10px 18px;border-radius:6px;' +
+      'background:#1F4F8F;color:#FFFFFF;font-weight:bold;text-decoration:none">' + escapeHtml_(LINK_EMAIL.button) + '</a></p>' +
+      '<p style="font-size:13px;color:#5A6774;word-break:break-all"><a href="' + href + '" style="color:#1F4F8F">' + href + '</a></p>' +
+      '<p>' + escapeHtml_(LINK_EMAIL.keep) + '</p>' +
+      '<p style="font-size:13px;color:#5A6774">' + escapeHtml_(LINK_EMAIL.why) + '</p>' +
+      '</div>';
+}
+
+/**
+ * Escapes text for HTML.
+ *
+ * @param {string} text The text.
+ * @return {string} The escaped text.
+ */
+function escapeHtml_(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/** Waits about as long as sending an email takes (see PAUSE_MIN_MS). */
+function pause_() {
+  Utilities.sleep(PAUSE_MIN_MS + Math.floor(Math.random() * PAUSE_SPREAD_MS));
+}
+
+// =============================================================================
+// 5. Email addresses and tokens
+// =============================================================================
+
+/**
+ * Normalises one email address: trimmed and lower-cased. Anything that isn't
+ * a single plausible address becomes ''.
+ *
+ * @param {*} raw The address as typed or found.
+ * @return {string} The normalised address, or ''.
+ */
+function normaliseEmail_(raw) {
+  const email = trimmed_(raw).toLowerCase();
+  return email.length <= EMAIL_MAX_LENGTH && EMAIL_INPUT_RE.test(email) ? email : '';
+}
+
+/**
+ * Every email address on an FA row: the Email column plus any addresses
+ * written in "Emails for Responsible Persons" (separated by commas,
+ * semicolons, spaces, "and"...). Normalised, without duplicates, at most
+ * EMAILS_PER_ROW_MAX.
+ *
+ * @param {Object} row A raw FA item.
+ * @return {Array<string>} The addresses (possibly none).
+ */
+function emailsOfRow_(row) {
+  const cols = columnMap_(row);
+  const found = [];
+  const addFrom = (text) => {
+    (String(text || '').match(EMAIL_FIND_RE) || []).forEach((raw) => {
+      const email = normaliseEmail_(raw);
+      if (email && found.indexOf(email) === -1 && found.length < EMAILS_PER_ROW_MAX) found.push(email);
+    });
+  };
+  const emailColumn = cols[FA_EMAIL_COLUMNS.email];
+  if (emailColumn) {
+    const value = parseValue_(emailColumn.value);
+    addFrom(value && typeof value === 'object' ? value.email : '');
+    addFrom(emailColumn.text);
   }
-  return { problems: problems, missingColumns: missingColumns };
+  addFrom(textOf_(cols[FA_EMAIL_COLUMNS.responsible]));
+  return found;
+}
+
+/**
+ * The link token for an address: HMAC-SHA256(LINK_SECRET, address), base64url,
+ * first TOKEN_LENGTH characters.
+ *
+ * @param {string} secret LINK_SECRET.
+ * @param {string} email A normalised address.
+ * @return {string} The token (matches TOKEN_RE).
+ */
+function tokenFor_(secret, email) {
+  const bytes = Utilities.computeHmacSha256Signature(email, secret, Utilities.Charset.UTF_8);
+  return Utilities.base64EncodeWebSafe(bytes).slice(0, TOKEN_LENGTH);
+}
+
+// =============================================================================
+// 6. Configuration
+// =============================================================================
+
+/**
+ * Reads the Script Properties into a plain config object. Values are trimmed;
+ * missing ones become ''. Nothing is validated here (see validateConfig_).
+ *
+ * @return {{token: string, siteUrl: string, secret: string, faBoardId: string,
+ *     dvpBoardId: string}} siteUrl is normalised (see normaliseSiteUrl_).
+ */
+function readConfig_() {
+  const all = PropertiesService.getScriptProperties().getProperties() || {};
+  const get = (key) => (typeof all[key] === 'string' ? all[key].trim() : '');
+  return {
+    token: get('MONDAY_API_TOKEN'),
+    siteUrl: normaliseSiteUrl_(get('SITE_URL')),
+    secret: get('LINK_SECRET'),
+    faBoardId: get('FA_BOARD_ID') || DEFAULT_FA_BOARD_ID,
+    dvpBoardId: get('DVP_BOARD_ID') || DEFAULT_DVP_BOARD_ID
+  };
+}
+
+/**
+ * SITE_URL must end in "/" unless it ends in ".html", so that
+ * SITE_URL + "#" + token is always a valid link.
+ *
+ * @param {string} url The trimmed SITE_URL ('' when unset).
+ * @return {string} The normalised URL ('' stays '').
+ */
+function normaliseSiteUrl_(url) {
+  if (!url || /\.html$/i.test(url) || url.charAt(url.length - 1) === '/') return url;
+  return url + '/';
+}
+
+/**
+ * Checks the config. refresh() logs the problems and stops, doGet/doPost
+ * answer "unavailable", and setup() throws them.
+ *
+ * @param {Object} cfg Config from readConfig_().
+ * @return {Array<string>} Problems that name properties, never their values.
+ */
+function validateConfig_(cfg) {
+  const problems = [];
+  if (!cfg.token) problems.push('MONDAY_API_TOKEN is not set');
+  if (!cfg.siteUrl) {
+    problems.push('SITE_URL is not set');
+  } else if (!SITE_URL_RE.test(cfg.siteUrl)) {
+    problems.push('SITE_URL must be an https:// address without spaces, "?" or "#"');
+  }
+  if (!cfg.secret) {
+    problems.push('LINK_SECRET is not set (run setup to create it)');
+  } else if (cfg.secret.length < SECRET_MIN_LENGTH) {
+    problems.push('LINK_SECRET is too short (delete it and run setup to create a new one; every link will change)');
+  }
+  if (!BOARD_ID_RE.test(cfg.faBoardId)) problems.push('FA_BOARD_ID must be a numeric board id');
+  if (!BOARD_ID_RE.test(cfg.dvpBoardId)) problems.push('DVP_BOARD_ID must be a numeric board id');
+  if (cfg.faBoardId === cfg.dvpBoardId) problems.push('FA_BOARD_ID and DVP_BOARD_ID must be different boards');
+  return problems;
+}
+
+/**
+ * setup() helper: creates LINK_SECRET (two random UUIDs, 64 hex characters)
+ * unless the property exists. An existing secret is never replaced, because
+ * that would change every link.
+ *
+ * @return {boolean} True when a secret was created.
+ */
+function ensureSecret_() {
+  const store = PropertiesService.getScriptProperties();
+  if (trimmed_(store.getProperty('LINK_SECRET'))) return false;
+  store.setProperty('LINK_SECRET', (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, ''));
+  return true;
+}
+
+/**
+ * setup() helper: checks that both boards can be read and have the columns
+ * this script reads.
+ *
+ * @param {Object} cfg Config from readConfig_().
+ * @return {{fa: Array<string>, dvp: Array<string>}} Column ids not found
+ *     (warnings: those fields will read as empty).
+ * @throws {Error} When a board can't be read, or the FA board has neither
+ *     email column (then nobody could get a link).
+ */
+function checkColumns_(cfg) {
+  const read = (boardId, ids, label) => {
+    try {
+      const found = readColumns_(cfg, boardId, ids).map((column) => column.id);
+      return ids.filter((id) => found.indexOf(id) === -1);
+    } catch (err) {
+      throw new Error('Could not read the ' + label + ' board (' + errorKind_(err) + '): check MONDAY_API_TOKEN and ' + label + '_BOARD_ID');
+    }
+  };
+  const missing = { fa: read(cfg.faBoardId, faReadColumnIds_(), 'FA'), dvp: read(cfg.dvpBoardId, dvpReadColumnIds_(), 'DVP') };
+  const emailIds = Object.keys(FA_EMAIL_COLUMNS).map((key) => FA_EMAIL_COLUMNS[key]);
+  if (emailIds.every((id) => missing.fa.indexOf(id) !== -1)) {
+    throw new Error('The FA board has neither email column (' + emailIds.join(', ') + '), so nobody could get a link');
+  }
+  return missing;
 }
 
 /**
@@ -543,126 +783,33 @@ function ensureRefreshTrigger_() {
   return true;
 }
 
-// =============================================================================
-// 4. Configuration
-// =============================================================================
-
-/**
- * Reads the Script Properties into a plain config object. Values are trimmed;
- * missing ones become ''. Nothing is validated here (see validateConfig_).
- *
- * @return {{token: string, statusLinkColumnId: string, siteUrl: string,
- *     sendLinkEmail: boolean, emailNewRowsFrom: ?number, faBoardId: string,
- *     dvpBoardId: string, dvpLinkColumnId: string}} siteUrl is normalised;
- *     sendLinkEmail is true only for the exact value "true"; emailNewRowsFrom
- *     is in epoch milliseconds, or null when unset or not a date.
- */
-function readConfig_() {
-  const store = PropertiesService.getScriptProperties();
-  // getProperties() reads everything in one service call; getProperty() is the fallback.
-  const all = typeof store.getProperties === 'function' ? store.getProperties() || {} : null;
-  const get = (key) => {
-    const value = all ? all[key] : store.getProperty(key);
-    return typeof value === 'string' ? value.trim() : '';
-  };
-  return {
-    token: get('MONDAY_API_TOKEN'),
-    statusLinkColumnId: get('STATUS_LINK_COLUMN_ID'),
-    siteUrl: normaliseSiteUrl_(get('SITE_URL')),
-    sendLinkEmail: get('SEND_LINK_EMAIL') === 'true',
-    emailNewRowsFrom: parseIsoMs_(get('EMAIL_NEW_ROWS_FROM')),
-    faBoardId: get('FA_BOARD_ID') || DEFAULT_FA_BOARD_ID,
-    dvpBoardId: get('DVP_BOARD_ID') || DEFAULT_DVP_BOARD_ID,
-    dvpLinkColumnId: get('DVP_LINK_COLUMN_ID')
-  };
+/** @return {Array<string>} Every FA column id this script requests. */
+function faReadColumnIds_() {
+  return Object.keys(FA_COLUMNS).map((key) => FA_COLUMNS[key])
+      .concat(Object.keys(FA_EMAIL_COLUMNS).map((key) => FA_EMAIL_COLUMNS[key]));
 }
 
-/**
- * Normalises SITE_URL (Appendix B #4): it must end in "/" unless it ends in
- * ".html", so that SITE_URL + "#" + code is always a valid link.
- *
- * @param {string} url The trimmed SITE_URL ('' when unset).
- * @return {string} The normalised URL ('' stays '').
- */
-function normaliseSiteUrl_(url) {
-  if (!url || /\.html$/i.test(url) || url.charAt(url.length - 1) === '/') return url;
-  return url + '/';
-}
-
-/**
- * Checks the config. refresh() logs the problems and stops, doGet answers
- * "unavailable", and setup() throws them.
- *
- * @param {Object} cfg Config from readConfig_().
- * @return {Array<string>} Problem descriptions that name properties, never
- *     their values. Empty when the config is usable.
- */
-function validateConfig_(cfg) {
-  const problems = [];
-  if (!cfg.token) problems.push('MONDAY_API_TOKEN is not set');
-
-  if (!cfg.statusLinkColumnId) {
-    problems.push('STATUS_LINK_COLUMN_ID is not set');
-  } else if (!COLUMN_ID_RE.test(cfg.statusLinkColumnId)) {
-    problems.push('STATUS_LINK_COLUMN_ID is not a valid column id');
-  } else if (faReadColumnIds_(null).indexOf(cfg.statusLinkColumnId) !== -1) {
-    // Codes go into empty cells: pointing this at, say, Product site would fill it with links.
-    problems.push('STATUS_LINK_COLUMN_ID must be the new Status link column, not a column the portal already reads');
-  }
-
-  if (!cfg.siteUrl) {
-    problems.push('SITE_URL is not set');
-  } else if (!SITE_URL_RE.test(cfg.siteUrl)) {
-    problems.push('SITE_URL must be an https:// address without spaces, "?" or "#"');
-  }
-
-  if (!BOARD_ID_RE.test(cfg.faBoardId)) problems.push('FA_BOARD_ID must be a numeric board id');
-  if (!BOARD_ID_RE.test(cfg.dvpBoardId)) problems.push('DVP_BOARD_ID must be a numeric board id');
-  if (cfg.faBoardId === cfg.dvpBoardId) problems.push('FA_BOARD_ID and DVP_BOARD_ID must be different boards');
-
-  if (cfg.dvpLinkColumnId) {
-    if (!COLUMN_ID_RE.test(cfg.dvpLinkColumnId)) {
-      problems.push('DVP_LINK_COLUMN_ID is not a valid column id');
-    } else if (dvpReadColumnIds_(null).indexOf(cfg.dvpLinkColumnId) !== -1) {
-      problems.push('DVP_LINK_COLUMN_ID must be the Connect boards column, not a column the portal already reads');
-    }
-  }
-  return problems;
-}
-
-/**
- * Email settings that setup() insists on. refresh() does not stop for these:
- * it writes links without the email label and records 'email_from_invalid'.
- *
- * @param {Object} cfg Config from readConfig_().
- * @return {Array<string>} Problem descriptions (property names only).
- */
-function emailConfigProblems_(cfg) {
-  if (cfg.sendLinkEmail && cfg.emailNewRowsFrom === null) {
-    return ['EMAIL_NEW_ROWS_FROM must be an ISO date such as 2026-12-01 while SEND_LINK_EMAIL is "true"'];
-  }
-  return [];
+/** @return {Array<string>} Every DVP column id this script requests. */
+function dvpReadColumnIds_() {
+  return Object.keys(DVP_COLUMNS).map((key) => DVP_COLUMNS[key]);
 }
 
 // =============================================================================
-// 5. Monday client
+// 7. Monday client (read-only: this file never sends a mutation)
 // =============================================================================
 
 /**
- * Sends one GraphQL request to Monday.
- *
- * It retries at most MAX_RETRIES times on HTTP 429 or 5xx, honouring
- * Retry-After up to RETRY_AFTER_MAX_S seconds (Appendix B #6). It never logs:
- * not the token, not the query, and not Monday's error messages, which can
- * echo column values.
+ * Sends one GraphQL query to Monday. Retries at most MAX_RETRIES times on
+ * HTTP 429 or 5xx, honouring Retry-After up to RETRY_AFTER_MAX_S seconds. It
+ * never logs: not the token, not the query, and not Monday's error messages,
+ * which can echo column values.
  *
  * @param {Object} cfg Config from readConfig_() (for the token).
- * @param {string} query The GraphQL query or mutation.
+ * @param {string} query The GraphQL query.
  * @param {Object=} variables GraphQL variables.
  * @return {{data: ?Object, errors: Array<Object>, httpStatus: number,
  *     rateLimited: boolean}} httpStatus is 0 when the request could not be
- *     made at all. rateLimited is true on HTTP 429 or a rate, complexity or
- *     concurrency error code.
+ *     made at all.
  */
 function mondayRequest_(cfg, query, variables) {
   const options = {
@@ -670,7 +817,7 @@ function mondayRequest_(cfg, query, variables) {
     contentType: 'application/json',
     headers: { 'Authorization': cfg.token, 'API-Version': MONDAY_API_VERSION },
     payload: JSON.stringify({ query: query, variables: variables || {} }),
-    muteHttpExceptions: true // let the code read 4xx/5xx answers instead of throwing
+    muteHttpExceptions: true // read 4xx/5xx answers instead of throwing
   };
 
   let response = null;
@@ -683,8 +830,7 @@ function mondayRequest_(cfg, query, variables) {
       return { data: null, errors: [], httpStatus: 0, rateLimited: false };
     }
     const status = response.getResponseCode();
-    const retryable = status === 429 || status >= 500;
-    if (!retryable || attempt >= MAX_RETRIES) break;
+    if (!(status === 429 || status >= 500) || attempt >= MAX_RETRIES) break;
     attempt++;
     Utilities.sleep(retryDelayMs_(response, attempt));
   }
@@ -702,7 +848,7 @@ function mondayRequest_(cfg, query, variables) {
 }
 
 /**
- * How long to wait before retrying a request: Retry-After (seconds) capped at
+ * How long to wait before a retry: Retry-After (seconds) capped at
  * RETRY_AFTER_MAX_S, or 1 s then 2 s when the header is absent.
  *
  * @param {HTTPResponse} response The 429 or 5xx response.
@@ -712,9 +858,7 @@ function mondayRequest_(cfg, query, variables) {
 function retryDelayMs_(response, attempt) {
   const header = headerValue_(response, 'retry-after');
   const seconds = Number(header);
-  if (header !== '' && isFinite(seconds) && seconds >= 0) {
-    return Math.min(seconds, RETRY_AFTER_MAX_S) * 1000;
-  }
+  if (header !== '' && isFinite(seconds) && seconds >= 0) return Math.min(seconds, RETRY_AFTER_MAX_S) * 1000;
   return 1000 * attempt;
 }
 
@@ -738,7 +882,7 @@ function headerValue_(response, name) {
  * Reads a response body without letting an odd body throw.
  *
  * @param {HTTPResponse} response The response.
- * @return {string} The body text, or '' when it cannot be read.
+ * @return {string} The body text, or ''.
  */
 function contentText_(response) {
   try {
@@ -749,8 +893,8 @@ function contentText_(response) {
 }
 
 /**
- * Extracts the machine-readable code from one GraphQL error. Only this code
- * is ever logged; the message is not.
+ * The machine-readable code of one GraphQL error. Only this code is ever
+ * logged; the message is not.
  *
  * @param {Object} error One entry of errors[].
  * @return {string} extensions.code (or extensions.error_code), or ''.
@@ -763,11 +907,11 @@ function errorCodeOf_(error) {
 }
 
 /**
- * Throws a data-free Error unless a read request fully succeeded. Reads are
- * all or nothing: a partial board must never replace a good cache.
+ * Throws a data-free Error unless a read fully succeeded. Reads are all or
+ * nothing: a partial board must never replace a good cache.
  *
  * @param {Object} res Result of mondayRequest_().
- * @throws {Error} With kind monday_rate_limited, monday_unauthorized,
+ * @throws {Error} Kind monday_rate_limited, monday_unauthorized,
  *     monday_error:<code> or monday_http_<status>.
  */
 function assertRead_(res) {
@@ -780,23 +924,17 @@ function assertRead_(res) {
 
 /**
  * Reads every item of a board: items_page first, then next_items_page until
- * the cursor is null (PAGE_LIMIT items per call).
+ * the cursor is null. Only the given column ids are requested.
  *
  * @param {Object} cfg Config from readConfig_().
  * @param {string} boardId The board to read.
  * @param {Array<string>} columnIds The only column ids to request.
- * @param {string=} fragmentSuffix Extra selection inside column_values, e.g.
- *     DVP_RELATION_FRAGMENT.
- * @param {string=} itemFields Item fields to request; defaults to 'id name'.
- *     The FA read passes 'id name created_at'.
- * @return {Array<Object>} Raw items: {id, name, created_at?, column_values:
- *     [{id, type, text, value, linked_item_ids?}]}.
- * @throws {Error} When any page cannot be read (see assertRead_), when the
- *     board is not found, or after MAX_PAGES pages.
+ * @return {Array<Object>} Raw items: {id, name, column_values: [{id, type, text, value}]}.
+ * @throws {Error} When any page can't be read, the board isn't found, or
+ *     after MAX_PAGES pages.
  */
-function readItems_(cfg, boardId, columnIds, fragmentSuffix, itemFields) {
-  const fields = (itemFields || 'id name') +
-      ' column_values(ids: $c) { id type text value ' + (fragmentSuffix || '') + ' }';
+function readItems_(cfg, boardId, columnIds) {
+  const fields = 'id name column_values(ids: $c) { id type text value }';
   const firstQuery = 'query ($b: ID!, $c: [String!], $l: Int!) { boards(ids: [$b]) { ' +
       'items_page(limit: $l) { cursor items { ' + fields + ' } } } }';
   const nextQuery = 'query ($cur: String!, $c: [String!], $l: Int!) { ' +
@@ -824,320 +962,215 @@ function readItems_(cfg, boardId, columnIds, fragmentSuffix, itemFields) {
 }
 
 /**
- * Reads column definitions (id, type, settings) from a board. Status column
- * settings list the labels in settings.labels[] ({label, is_deactivated}).
+ * Reads column definitions (id and type) from a board, for setup().
  *
  * @param {Object} cfg Config from readConfig_().
  * @param {string} boardId The board.
- * @param {Array<string>} columnIds Column ids to look up. Unknown ids are
+ * @param {Array<string>} columnIds Column ids to look up; unknown ids are
  *     simply absent from the result.
- * @return {Array<{id: string, type: string, settings: ?Object}>} One entry
- *     per column found.
- * @throws {Error} When the request fails or the board is not found.
+ * @return {Array<{id: string, type: string}>} One entry per column found.
+ * @throws {Error} When the request fails or the board isn't found.
  */
 function readColumns_(cfg, boardId, columnIds) {
-  const query = 'query ($b: ID!, $c: [String!]) { boards(ids: [$b]) { columns(ids: $c) { id type settings } } }';
+  const query = 'query ($b: ID!, $c: [String!]) { boards(ids: [$b]) { columns(ids: $c) { id type } } }';
   const res = mondayRequest_(cfg, query, { b: String(boardId), c: columnIds });
   assertRead_(res);
   const boards = res.data.boards;
   if (!Array.isArray(boards) || !boards.length || !boards[0]) throw fail_('monday_board_not_found');
-  const columns = Array.isArray(boards[0].columns) ? boards[0].columns : [];
-  return columns.filter((column) => column && typeof column === 'object').map((column) => ({
-    id: column.id,
-    type: column.type,
-    settings: parseValue_(column.settings) // a JSON object; parsed in case it comes as a string
-  }));
+  return (Array.isArray(boards[0].columns) ? boards[0].columns : [])
+      .filter((column) => column && typeof column === 'object');
+}
+
+// =============================================================================
+// 8. Building the views
+// =============================================================================
+
+/**
+ * Reads both boards and rebuilds the cache. The caller must hold the script
+ * lock (refresh() and lookup_() both do).
+ *
+ * @param {string} mode 'refresh' or 'rebuild' (for the log line).
+ * @return {?{views: Object<string, Object>, stats: Object}} null when the
+ *     Script Properties are incomplete.
+ * @throws {Error} A data-free Error when Monday or the cache fails.
+ */
+function rebuild_(mode) {
+  const started = Date.now();
+  const cfg = readConfig_();
+  const problems = validateConfig_(cfg);
+  if (problems.length) {
+    // Problems name properties, never their values, so they are safe to log.
+    console.error(JSON.stringify({ event: LOG_EVENT, mode: mode, error: 'config_invalid', problems: problems }));
+    return null;
+  }
+  const stats = newStats_(mode);
+  try {
+    const views = buildViews_(cfg, stats);
+    stats.stage = 'write_cache';
+    stats.cacheLargestShard = writeCache_(views);
+    stats.stage = 'done';
+    stats.ms = Date.now() - started;
+    logRun_(stats);
+    return { views: views, stats: stats };
+  } catch (err) {
+    stats.ms = Date.now() - started;
+    const kind = errorKind_(err);
+    logRun_(stats, kind);
+    throw fail_(kind);
+  }
 }
 
 /**
- * Finds a column by id in the result of readColumns_().
+ * Reads Monday and builds token -> {apps: [...]} for every email address on
+ * the FA board.
  *
- * @param {Array<Object>} columns Columns from readColumns_().
- * @param {string} id Column id.
- * @return {?Object} The column, or null.
+ *   1. Read the FA board (allow-listed columns + the two email columns).
+ *   2. Read the DVP board and attach each request to its FA app(s) by name.
+ *   3. For each FA row: build its view once, then add it to the list of every
+ *      address on the row. Rows without an address can't be reached.
+ *   4. Sort each list newest first.
+ *
+ * @param {Object} cfg Config from readConfig_() (already validated).
+ * @param {Object} stats Run stats to fill.
+ * @return {Object<string, {apps: Array<Object>}>} Token -> entry.
  */
-function findColumn_(columns, id) {
-  for (let i = 0; i < columns.length; i++) {
-    if (columns[i].id === id) return columns[i];
-  }
-  return null;
-}
+function buildViews_(cfg, stats) {
+  stats.stage = 'read_fa';
+  const faRows = uniqueById_(readItems_(cfg, cfg.faBoardId, faReadColumnIds_()));
+  stats.faRows = faRows.length;
 
-/**
- * Tells whether a status column has a given label that is not deactivated.
- * Handles the current settings shape (labels: [{label, is_deactivated}]) and
- * the older one (labels: {index: text}, deactivated_labels: [index]).
- *
- * @param {?Object} column A column from readColumns_().
- * @param {string} label The label text, e.g. 'Status link'.
- * @return {boolean} True when the label exists and is active.
- */
-function hasActiveLabel_(column, label) {
-  const settings = column && column.settings && typeof column.settings === 'object' ? column.settings : null;
-  if (!settings || !settings.labels) return false;
-  const labels = settings.labels;
-  if (Array.isArray(labels)) {
-    return labels.some((entry) => entry && typeof entry.label === 'string' &&
-        entry.label.trim() === label && !entry.is_deactivated);
-  }
-  if (typeof labels === 'object') {
-    const off = Array.isArray(settings.deactivated_labels) ? settings.deactivated_labels.map(String) : [];
-    return Object.keys(labels).some((index) => typeof labels[index] === 'string' &&
-        labels[index].trim() === label && off.indexOf(String(index)) === -1);
-  }
-  return false;
-}
+  stats.stage = 'read_dvp';
+  const dvpRows = uniqueById_(readItems_(cfg, cfg.dvpBoardId, dvpReadColumnIds_()));
+  stats.dvpRows = dvpRows.length;
 
-/**
- * Writes column values to many items of one board, BATCH_SIZE aliased
- * mutations per request:
- *
- *   mutation ($b: ID!, $i0: ID!, $v0: JSON!, $i1: ID!, $v1: JSON!, ...) {
- *     w0: change_multiple_column_values(board_id: $b, item_id: $i0, column_values: $v0) { id }
- *     w1: ...
- *   }
- *
- * Each $vN is the JSON-encoded column values. Monday answers HTTP 200 even
- * when some aliases fail; a failed alias has data.wN = null and an error whose
- * path[0] is "wN". Labels are never created: create_labels_if_missing is left
- * at its default (false).
- *
- * After a request that is rate limited, or that fails outright even after the
- * retries, no further batches are sent. Their items are reported as
- * 'not_sent', and the next run carries on.
- *
- * @param {Object} cfg Config from readConfig_().
- * @param {string} boardId The board the items belong to.
- * @param {Array<{itemId: string, values: Object}>} writes Column id -> value,
- *     per item.
- * @return {{results: Array<{itemId: string, ok: boolean, errorCode: ?string,
- *     missingLabel: boolean}>, rateLimited: boolean, stopped: boolean}} One
- *     result per write, in the same order as writes.
- */
-function writeColumnBatches_(cfg, boardId, writes) {
-  const results = [];
-  let rateLimited = false;
-  let stopped = false;
-
-  for (let start = 0; start < writes.length; start += BATCH_SIZE) {
-    const batch = writes.slice(start, start + BATCH_SIZE);
-    if (stopped) {
-      batch.forEach((write) => results.push(writeResult_(write.itemId, false, 'not_sent', false)));
-      continue;
+  stats.stage = 'build';
+  const dvpByApp = matchDvpToApps_(faRows, dvpRows, stats);
+  const appsByToken = {};
+  faRows.forEach((row) => {
+    const emails = emailsOfRow_(row);
+    if (!emails.length) {
+      stats.appsWithoutEmail++;
+      return;
     }
-
-    const variables = { b: String(boardId) };
-    batch.forEach((write, n) => {
-      variables['i' + n] = String(write.itemId);
-      variables['v' + n] = JSON.stringify(write.values); // JSON variables travel as JSON-encoded strings
+    const view = toApplicantView(row, dvpByApp.get(String(row.id)) || [], stats);
+    stats.appsServed++;
+    emails.forEach((email) => {
+      const token = tokenFor_(cfg.secret, email);
+      if (!hasOwn_(appsByToken, token)) appsByToken[token] = [];
+      appsByToken[token].push(view);
     });
-    const res = mondayRequest_(cfg, writeMutation_(batch.length), variables);
-    const data = res.httpStatus === 200 && res.data ? res.data : null;
-    if (res.rateLimited) rateLimited = true;
-    if (res.rateLimited || !data) stopped = true;
+  });
 
-    // The code for aliases that failed without an error of their own.
-    const requestCode = res.rateLimited ? 'rate_limited'
-        : firstUnpathedCode_(res.errors) || (data ? 'no_result' : 'http_' + res.httpStatus);
+  const views = {};
+  Object.keys(appsByToken).forEach((token) => {
+    views[token] = { apps: appsByToken[token].sort(compareNewestFirst_) };
+  });
+  stats.addresses = Object.keys(views).length;
+  return views;
+}
 
-    batch.forEach((write, n) => {
-      const alias = 'w' + n;
-      const aliasError = errorForAlias_(res.errors, alias);
-      if (data && data[alias] && !aliasError) {
-        results.push(writeResult_(write.itemId, true, null, false));
-      } else {
-        const code = aliasError ? safeCode_(errorCodeOf_(aliasError)) : requestCode;
-        results.push(writeResult_(write.itemId, false, code, isMissingLabel_(aliasError)));
-      }
+/**
+ * Drops items without an id and repeated ids (a page boundary can repeat one).
+ *
+ * @param {Array<Object>} rows Raw items.
+ * @return {Array<Object>} The items, first occurrence of each id kept.
+ */
+function uniqueById_(rows) {
+  const seen = {};
+  return rows.filter((row) => {
+    if (!row || row.id === undefined || row.id === null) return false;
+    const id = String(row.id);
+    if (hasOwn_(seen, id)) return false;
+    seen[id] = true;
+    return true;
+  });
+}
+
+// -----------------------------------------------------------------------------
+// DVP requests -> FA apps
+// -----------------------------------------------------------------------------
+
+/**
+ * Attaches each DVP request to the FA app(s) it belongs to. The DVP board has
+ * no email and no link to the FA board, so the app name is the only key:
+ *
+ *   - a DVP name is cut at its first qualifier and split on "/":
+ *       "Harbor Swap (RFQ request)"             -> ["harbor swap"]
+ *       "Lumen Wallet / Lumen Pay (Lumen Labs)" -> ["lumen wallet", "lumen pay"]
+ *       "Copperleaf (Oct request)"              -> ["copperleaf"]
+ *   - an FA app answers to its full name and to its name cut the same way:
+ *       "Copperleaf - Copperleaf Labs"          -> "copperleaf - copperleaf labs", "copperleaf"
+ *   - a request goes to every FA app with an equal key (case and spacing
+ *     ignored). There is no partial matching: "Quillpoint" does not
+ *     match "Quillpoint Vaults". A request with no match is not shown to anyone and is
+ *     counted as dvpUnmatched; renaming it on the DVP board to the app's name
+ *     fixes that.
+ *
+ * @param {Array<Object>} faRows Raw FA items.
+ * @param {Array<Object>} dvpRows Raw DVP items.
+ * @param {Object} stats Run stats (dvpMatched, dvpUnmatched).
+ * @return {Map<string, Array<Object>>} FA item id -> raw DVP items.
+ */
+function matchDvpToApps_(faRows, dvpRows, stats) {
+  const appIdsByKey = new Map();
+  faRows.forEach((row) => {
+    [nameKey_(row.name), baseNameKey_(row.name)].forEach((key) => {
+      if (key.length < MATCH_KEY_MIN) return;
+      const ids = appIdsByKey.get(key) || [];
+      if (ids.indexOf(String(row.id)) === -1) ids.push(String(row.id));
+      appIdsByKey.set(key, ids);
     });
-  }
-  return { results: results, rateLimited: rateLimited, stopped: stopped };
-}
+  });
 
-/**
- * Builds the aliased mutation text for a batch of the given size.
- *
- * @param {number} count Number of items in the batch (1..BATCH_SIZE).
- * @return {string} The GraphQL mutation.
- */
-function writeMutation_(count) {
-  const params = ['$b: ID!'];
-  const fields = [];
-  for (let n = 0; n < count; n++) {
-    params.push('$i' + n + ': ID!', '$v' + n + ': JSON!');
-    fields.push('w' + n + ': change_multiple_column_values(board_id: $b, item_id: $i' + n +
-        ', column_values: $v' + n + ') { id }');
-  }
-  return 'mutation (' + params.join(', ') + ') { ' + fields.join(' ') + ' }';
-}
-
-/**
- * Makes one per-item write result.
- *
- * @param {string} itemId The item.
- * @param {boolean} ok Whether Monday saved the values.
- * @param {?string} errorCode Monday's extensions.code, or our own code
- *     ('not_sent', 'rate_limited', 'http_<status>', 'no_result').
- * @param {boolean} missingLabel Whether the failure was a missing status label.
- * @return {{itemId: string, ok: boolean, errorCode: ?string, missingLabel: boolean}}
- */
-function writeResult_(itemId, ok, errorCode, missingLabel) {
-  return { itemId: String(itemId), ok: ok, errorCode: errorCode, missingLabel: missingLabel };
-}
-
-/**
- * Finds the error that belongs to one alias (error.path[0] === alias).
- *
- * @param {Array<Object>} errors errors[] from the response.
- * @param {string} alias E.g. 'w3'.
- * @return {?Object} The error, or null.
- */
-function errorForAlias_(errors, alias) {
-  for (let i = 0; i < errors.length; i++) {
-    const error = errors[i];
-    if (error && Array.isArray(error.path) && error.path[0] === alias) return error;
-  }
-  return null;
-}
-
-/**
- * The code of the first error that is not tied to an alias (a request-level
- * error), if any.
- *
- * @param {Array<Object>} errors errors[] from the response.
- * @return {string} A sanitised code, or ''.
- */
-function firstUnpathedCode_(errors) {
-  for (let i = 0; i < errors.length; i++) {
-    const error = errors[i];
-    if (!(error && Array.isArray(error.path) && error.path.length)) {
-      const code = errorCodeOf_(error);
-      return code ? safeCode_(code) : '';
+  const byApp = new Map();
+  dvpRows.forEach((dvpRow) => {
+    const appIds = [];
+    dvpNameKeys_(dvpRow.name).forEach((key) => {
+      (appIdsByKey.get(key) || []).forEach((id) => {
+        if (appIds.indexOf(id) === -1) appIds.push(id);
+      });
+    });
+    if (!appIds.length) {
+      stats.dvpUnmatched++;
+      return;
     }
-  }
-  return '';
+    stats.dvpMatched++;
+    appIds.forEach((id) => byApp.set(id, (byApp.get(id) || []).concat([dvpRow])));
+  });
+  return byApp;
 }
 
 /**
- * Tells whether an error is Monday's "status label does not exist" error
- * (ColumnValueException with column_validation_error_code "missingLabel").
+ * A name for matching: Unicode-normalised, lower-cased, single-spaced.
  *
- * @param {?Object} error One entry of errors[], or null.
- * @return {boolean} True for a missing-label error.
+ * @param {*} name An item name.
+ * @return {string} The key ('' for no name).
  */
-function isMissingLabel_(error) {
-  const ext = error && error.extensions;
-  const data = ext && ext.error_data;
-  return Boolean(data && data.column_validation_error_code === 'missingLabel');
-}
-
-// =============================================================================
-// 6. Links
-// =============================================================================
-
-/**
- * Makes a new status code: the first 22 characters of the base64url SHA-256
- * of two random UUIDs (about 132 bits). It tries again in the
- * astronomically unlikely case that the code is already taken.
- *
- * @param {Object<string, boolean>|Set<string>} taken Codes already in use.
- *     Not modified: the caller records the new code.
- * @return {string} A code matching CODE_RE.
- * @throws {Error} 'code_generation_failed' if CODE_ATTEMPTS tries all fail.
- */
-function newCode_(taken) {
-  for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt++) {
-    const digest = Utilities.computeDigest(
-        Utilities.DigestAlgorithm.SHA_256,
-        Utilities.getUuid() + Utilities.getUuid(),
-        Utilities.Charset.UTF_8);
-    const code = Utilities.base64EncodeWebSafe(digest).slice(0, CODE_LENGTH);
-    if (CODE_RE.test(code) && !isTaken_(taken, code)) return code;
-  }
-  throw fail_('code_generation_failed');
+function nameKey_(name) {
+  return trimmed_(name).normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 /**
- * Checks a code against a set of taken codes (a plain object or a Set).
+ * A name cut at its first qualifier (see NAME_CUT_RE).
  *
- * @param {Object<string, boolean>|Set<string>} taken Codes in use.
- * @param {string} code The candidate code.
- * @return {boolean} True when the code is already in use.
+ * @param {*} name An item name.
+ * @return {string} The key ('' for no name).
  */
-function isTaken_(taken, code) {
-  if (!taken) return false;
-  if (typeof taken.has === 'function') return taken.has(code);
-  return hasOwn_(taken, code);
+function baseNameKey_(name) {
+  const key = nameKey_(name);
+  const cut = NAME_CUT_RE.exec(key);
+  return (cut ? key.slice(0, cut.index) : key).trim();
 }
 
 /**
- * Reads the code out of a Status link cell (Appendix B #2): take value.url,
- * then the part after '#', then drop anything after a '/'.
+ * The keys a DVP request name matches on: its base name, split on "/".
  *
- * @param {?Object} column The raw Status link column value {id, type, text, value}.
- * @return {?string} The code when it matches CODE_RE; '' when the cell is
- *     empty (it gets a new code); null when the cell is not empty but cannot
- *     be read, or the column is missing or is not a link column. A null cell
- *     is never overwritten.
+ * @param {*} name A DVP item name.
+ * @return {Array<string>} Keys of at least MATCH_KEY_MIN characters.
  */
-function codeFromCell_(column) {
-  if (!column || typeof column !== 'object') return null;
-  if (column.type && column.type !== 'link') return null;
-  if (isEmptyLinkCell_(column)) return '';
-  const value = parseValue_(column.value);
-  const url = value && typeof value === 'object' ? trimmed_(value.url) : '';
-  const hash = url.indexOf('#');
-  if (hash === -1) return null;
-  const code = url.slice(hash + 1).split('/')[0];
-  return CODE_RE.test(code) ? code : null;
+function dvpNameKeys_(name) {
+  return baseNameKey_(name).split('/').map((part) => part.trim()).filter((part) => part.length >= MATCH_KEY_MIN);
 }
-
-/**
- * Tells whether a link cell is empty: no text, and a value that is null or
- * has neither a url nor a text. An unparseable value counts as NOT empty, so
- * it is never overwritten.
- *
- * @param {Object} column A raw link column value.
- * @return {boolean} True when the cell is empty.
- */
-function isEmptyLinkCell_(column) {
-  if (trimmed_(column.text)) return false;
-  const raw = column.value;
-  if (raw === null || raw === undefined || raw === '' || raw === 'null') return true;
-  const value = parseValue_(raw);
-  return Boolean(value) && typeof value === 'object' && !trimmed_(value.url) && !trimmed_(value.text);
-}
-
-/**
- * The Status link value for a code (Appendix B #4).
- *
- * @param {Object} cfg Config from readConfig_() (siteUrl is normalised).
- * @param {string} code The code.
- * @return {{url: string, text: string}} {url: SITE_URL + '#' + code, text: 'Status link'}.
- */
-function linkFor_(cfg, code) {
-  return { url: cfg.siteUrl + '#' + code, text: STATUS_LINK_TEXT };
-}
-
-/**
- * The column values written for one row: the link, plus the Send Email label
- * when the row's link should be emailed.
- *
- * @param {Object} cfg Config from readConfig_().
- * @param {string} code The new code.
- * @param {boolean} withLabel Also set Send Email to "Status link".
- * @return {Object} Column id -> value, ready for change_multiple_column_values.
- */
-function linkValues_(cfg, code, withLabel) {
-  const values = {};
-  values[cfg.statusLinkColumnId] = linkFor_(cfg, code);
-  if (withLabel) values[FA_COLUMNS.sendEmail] = { label: STATUS_LINK_TEXT };
-  return values;
-}
-
-// =============================================================================
-// 7. Views
-// =============================================================================
 
 // -----------------------------------------------------------------------------
 // Small parsers for raw Monday column values ({id, type, text, value}).
@@ -1176,8 +1209,8 @@ function parseJson_(text) {
 }
 
 /**
- * Parses a column's "value" field. It is normally a JSON string, but an
- * already-parsed value is accepted too.
+ * Parses a column's "value" field (normally a JSON string; an already parsed
+ * value is accepted too).
  *
  * @param {*} raw The value field.
  * @return {*} The parsed value, or null when empty or unparseable.
@@ -1198,10 +1231,10 @@ function trimmed_(value) {
 }
 
 /**
- * A status column's label. Monday sends null when the status is empty.
+ * A status column's label (Monday sends null when it is empty).
  *
  * @param {?Object} column Raw status column value.
- * @return {?string} The trimmed label, or null when empty.
+ * @return {?string} The trimmed label, or null.
  */
 function statusText_(column) {
   const text = column ? trimmed_(column.text) : '';
@@ -1258,7 +1291,7 @@ function dateOf_(column) {
  * Tells whether a string is a real calendar date in YYYY-MM-DD form.
  *
  * @param {string} text The candidate.
- * @return {boolean} True for e.g. '2026-10-18'; false for '2026-02-30'.
+ * @return {boolean} True for '2026-10-18'; false for '2026-02-30'.
  */
 function isIsoDate_(text) {
   if (!ISO_DATE_RE.test(text)) return false;
@@ -1276,9 +1309,7 @@ function isIsoDate_(text) {
 function parseIsoMs_(text) {
   const t = trimmed_(text);
   if (!t) return null;
-  if (isIsoDate_(t)) {
-    return Date.UTC(Number(t.slice(0, 4)), Number(t.slice(5, 7)) - 1, Number(t.slice(8, 10)));
-  }
+  if (isIsoDate_(t)) return Date.UTC(Number(t.slice(0, 4)), Number(t.slice(5, 7)) - 1, Number(t.slice(8, 10)));
   const m = ISO_DATETIME_RE.exec(t);
   if (!m || !isIsoDate_(m[1])) return null;
   // Rebuild a strict ISO string: seconds present, milliseconds at most 3 digits, explicit zone.
@@ -1329,18 +1360,7 @@ function linkOf_(column) {
 }
 
 /**
- * When a column last changed, from value.changed_at.
- *
- * @param {?Object} column Raw column value.
- * @return {?number} Epoch milliseconds, or null.
- */
-function changedAtMs_(column) {
-  const value = column ? parseValue_(column.value) : null;
-  return value && typeof value === 'object' ? parseIsoMs_(value.changed_at) : null;
-}
-
-/**
- * The latest changed_at among some columns, as a UTC date.
+ * The latest value.changed_at among some columns, as a UTC date.
  *
  * @param {Array<?Object>} columns Raw column values (missing ones allowed).
  * @return {?string} 'YYYY-MM-DD', or null when none has a changed_at.
@@ -1348,7 +1368,8 @@ function changedAtMs_(column) {
 function latestChangeDate_(columns) {
   let latest = null;
   columns.forEach((column) => {
-    const ms = changedAtMs_(column);
+    const value = column ? parseValue_(column.value) : null;
+    const ms = value && typeof value === 'object' ? parseIsoMs_(value.changed_at) : null;
     if (ms !== null && (latest === null || ms > latest)) latest = ms;
   });
   return latest === null ? null : new Date(latest).toISOString().slice(0, 10);
@@ -1401,8 +1422,8 @@ function requestRef_(url, text) {
 }
 
 /**
- * hasOwnProperty that is safe for any object. Label maps are plain objects,
- * so a label like "toString" must not hit Object.prototype.
+ * hasOwnProperty that is safe for any object (a label like "toString" must
+ * not hit Object.prototype).
  *
  * @param {Object} object The object.
  * @param {string} key The key.
@@ -1417,8 +1438,8 @@ function hasOwn_(object, key) {
 // -----------------------------------------------------------------------------
 
 /**
- * Maps the FA Status label to a state key. Empty: 'received'. An unknown
- * label is treated as 'in_review' and counted in stats.unknownLabels.fa.
+ * FA Status label -> state key. Empty: 'received'. Unknown: 'in_review',
+ * counted in stats.unknownLabels.fa.
  *
  * @param {?string} label The label (null when empty).
  * @param {Object=} stats Run stats, for unknown-label counting.
@@ -1429,8 +1450,8 @@ function faState_(label, stats) {
 }
 
 /**
- * Maps the Testing Process label to a testing key. Empty: 'not_started'. An
- * unknown label is treated as 'in_progress' and counted.
+ * Testing Process label -> testing key. Empty: 'not_started'. Unknown:
+ * 'in_progress', counted.
  *
  * @param {?string} label The label (null when empty).
  * @param {Object=} stats Run stats, for unknown-label counting.
@@ -1441,8 +1462,8 @@ function testingState_(label, stats) {
 }
 
 /**
- * Maps a DVP Status label to a state key. Empty or unknown: 'in_review';
- * unknown labels are counted.
+ * DVP Status label -> state key. Empty or unknown: 'in_review'; unknown labels
+ * are counted.
  *
  * @param {?string} label The label (null when empty).
  * @param {Object=} stats Run stats, for unknown-label counting.
@@ -1476,24 +1497,22 @@ function stateFor_(label, map, emptyState, unknownState, stats, bucket) {
 // -----------------------------------------------------------------------------
 
 /**
- * Builds the "app" object of the response contract from a raw FA item. This
- * is the allow-list: only these fields ever leave Apps Script.
+ * Builds one application of the answer from a raw FA item. This is the
+ * allow-list: only these fields ever leave Apps Script.
  *
- *   name, institution, type, submitted, state,
+ *   id, name, institution, type, submitted, state,
  *   lock {verified, amountMillions}, testing, partyId,
  *   website, announcement, updated, dvp[]
  *
- * Details (Appendix B #7): texts are capped (name and institution 200,
- * partyId 2,000) and empty ones become null. Links are https-only, otherwise
- * null. announcement is only sent when the state is 'approved'. lock is
- * always present; amountMillions is only set when it is above 0. updated is
- * the latest changed_at among FA Status, Testing Process, Lock verified and
- * FA Link. dvp is sorted newest submission first.
+ * Texts are capped and empty ones become null. Links are https-only,
+ * otherwise null. announcement is only sent once approved. amountMillions is
+ * only set when above 0. updated is the latest change among FA Status,
+ * Testing Process, Lock Verified and FA Link. dvp is newest first.
  *
- * @param {Object} row Raw FA item {id, name, created_at, column_values}.
- * @param {Array<Object>=} dvpRows Raw DVP items connected to this row.
+ * @param {Object} row Raw FA item {id, name, column_values}.
+ * @param {Array<Object>=} dvpRows Raw DVP items matched to this app.
  * @param {Object=} stats Run stats, for unknown-label counting.
- * @return {Object} The app object.
+ * @return {Object} The application.
  */
 function toApplicantView(row, dvpRows, stats) {
   const cols = columnMap_(row);
@@ -1501,9 +1520,10 @@ function toApplicantView(row, dvpRows, stats) {
   const amount = numberOf_(cols[FA_COLUMNS.lockedAmount]);
   const dvp = (Array.isArray(dvpRows) ? dvpRows : [])
       .map((dvpRow) => toDvpView_(dvpRow, stats))
-      .sort(compareDvpViews_);
+      .sort(compareNewestFirst_);
 
   return {
+    id: row && row.id !== undefined && row.id !== null ? String(row.id) : null,
     name: capText_(row && row.name, NAME_MAX),
     institution: capText_(textOf_(cols[FA_COLUMNS.institution]), INSTITUTION_MAX),
     type: capText_(statusText_(cols[FA_COLUMNS.type]), LABEL_MAX),
@@ -1528,15 +1548,13 @@ function toApplicantView(row, dvpRows, stats) {
 }
 
 /**
- * Builds one DVP item of the contract from a raw DVP item:
+ * Builds one DVP request of the answer from a raw DVP item:
  * {id, name, state, submitted, finalApproval, requestUrl, requestRef, updated}.
- * finalApproval is only set when the state is 'approved'. requestUrl is
- * https-only. updated is the latest changed_at among Status, Final Approval
- * Date and Request Link (the same idea as the FA rule).
+ * finalApproval is only set once approved. requestUrl is https-only.
  *
  * @param {Object} row Raw DVP item {id, name, column_values}.
  * @param {Object=} stats Run stats, for unknown-label counting.
- * @return {Object} The DVP view.
+ * @return {Object} The DVP request.
  */
 function toDvpView_(row, stats) {
   const cols = columnMap_(row);
@@ -1559,14 +1577,14 @@ function toDvpView_(row, stats) {
 }
 
 /**
- * Sort order for DVP views: newest submission first, undated ones last, and
- * ties broken by the higher (newer) item id first.
+ * Sort order for applications and DVP requests: newest submission first,
+ * undated ones last, ties broken by the higher (newer) item id.
  *
- * @param {Object} a A DVP view.
- * @param {Object} b A DVP view.
+ * @param {Object} a A view with submitted and id.
+ * @param {Object} b A view with submitted and id.
  * @return {number} Negative when a comes first.
  */
-function compareDvpViews_(a, b) {
+function compareNewestFirst_(a, b) {
   if (a.submitted !== b.submitted) {
     if (!a.submitted) return 1;
     if (!b.submitted) return -1;
@@ -1580,409 +1598,27 @@ function compareDvpViews_(a, b) {
 }
 
 // =============================================================================
-// 8. Build pipeline
-// =============================================================================
-
-/**
- * Reads Monday and builds the views. This is shared by refresh() (write mode)
- * and doGet's cache rebuild (read-only mode).
- *
- *   1. Read the FA board: allow-listed columns + Status link + Send Email.
- *   2. Read the DVP board, only when DVP_LINK_COLUMN_ID is set, and group its
- *      items by the FA item they are connected to.
- *   3. Read every Status link cell: a code, empty, or unreadable. Count the
- *      unreadable ones and the codes found on more than one row.
- *   4. Write mode only: give empty cells a code and write the links (with
- *      the email rule, the brake and the write cap). Read-only mode never
- *      sends a mutation.
- *   5. Build a view for each row whose code is valid, unique and saved.
- *
- * @param {Object} cfg Config from readConfig_() (already validated).
- * @param {{write: boolean, stats: Object}=} opts write: true to issue codes;
- *     stats: a stats object to fill (one is created when absent).
- * @return {{views: Object<string, Object>, stats: Object}} views maps code ->
- *     app object.
- * @throws {Error} When a board cannot be read; nothing has been written then.
- */
-function buildFromMonday_(cfg, opts) {
-  const options = opts || {};
-  const write = options.write === true;
-  const stats = options.stats || newStats_(write ? 'refresh' : 'rebuild');
-  const started = Date.now();
-
-  // 1. The FA board.
-  stats.stage = 'read_fa';
-  const faRows = uniqueById_(readItems_(cfg, cfg.faBoardId, faReadColumnIds_(cfg), '', 'id name created_at'));
-  stats.faRows = faRows.length;
-
-  // 2. The DVP board (phase 2), grouped by connected FA item id.
-  stats.stage = 'read_dvp';
-  let dvpByFaId = {};
-  if (cfg.dvpLinkColumnId) {
-    const dvpRows = readItems_(cfg, cfg.dvpBoardId, dvpReadColumnIds_(cfg), DVP_RELATION_FRAGMENT, 'id name');
-    stats.dvpRows = dvpRows.length;
-    dvpByFaId = groupDvpByFaId_(dvpRows, cfg.dvpLinkColumnId, stats);
-  }
-
-  // 3. Status link cells.
-  stats.stage = 'read_codes';
-  const entries = faRows.map((row) => linkEntry_(cfg, row));
-  const codeCounts = {}; // code -> number of rows carrying it
-  entries.forEach((entry) => {
-    if (entry.code === null) {
-      if (entry.columnMissing) countInto_(stats.errorCodes, 'status_link_column_missing');
-      else stats.unreadableLinks++;
-    } else if (entry.code === '') {
-      stats.rowsWithoutLink++;
-    } else {
-      codeCounts[entry.code] = (codeCounts[entry.code] || 0) + 1;
-    }
-  });
-  Object.keys(codeCounts).forEach((code) => {
-    if (codeCounts[code] > 1) {
-      // Appendix B #3: none of these rows is served until the team clears the extra copies.
-      stats.duplicateCodes++;
-      stats.duplicateRows += codeCounts[code];
-    }
-  });
-
-  // 4. New links (refresh only).
-  if (write) {
-    stats.stage = 'write_links';
-    writeNewLinks_(cfg, entries, codeCounts, stats);
-  }
-
-  // 5. Views for rows whose code is valid, unique and saved.
-  stats.stage = 'build_views';
-  const views = {};
-  entries.forEach((entry) => {
-    if (entry.code && CODE_RE.test(entry.code) && codeCounts[entry.code] === 1) {
-      const id = String(entry.row.id);
-      views[entry.code] = toApplicantView(entry.row, hasOwn_(dvpByFaId, id) ? dvpByFaId[id] : [], stats);
-    }
-  });
-  stats.served = Object.keys(views).length;
-  stats.stage = 'built';
-  stats.ms = Date.now() - started;
-  return { views: views, stats: stats };
-}
-
-/**
- * A fresh stats object. It holds counts, flags, unknown board labels and
- * error codes only: never codes, names or URLs. logRun_ prints it.
- *
- * @param {string=} mode 'refresh' or 'rebuild'.
- * @return {Object} The stats object.
- */
-function newStats_(mode) {
-  return {
-    mode: mode || 'refresh',
-    stage: 'start',             // last pipeline step reached (to locate failures)
-    faRows: 0,                  // FA items read
-    dvpRows: 0,                 // DVP items read (0 while DVP_LINK_COLUMN_ID is unset)
-    dvpUnlinked: 0,             // DVP items connected to no FA item
-    served: 0,                  // views written to the cache
-    rowsWithoutLink: 0,         // FA rows whose Status link was empty when read
-    unreadableLinks: 0,         // non-empty Status links without a readable code (never overwritten)
-    duplicateCodes: 0,          // codes found on more than one row
-    duplicateRows: 0,           // rows carrying those codes (none of them served)
-    linksPlanned: 0,            // links this run tried to write (at most WRITE_CAP_PER_RUN)
-    linksWritten: 0,            // links Monday saved
-    linkWriteFailures: 0,       // links sent but not saved (see errorCodes)
-    rowsNotSent: 0,             // planned links not sent because writing stopped early
-    rowsDeferredByCap: 0,       // empty rows left for later runs by WRITE_CAP_PER_RUN
-    emailQualified: 0,          // rows meeting every email condition (before the brake)
-    emailLabelsSet: 0,          // rows saved with Send Email = "Status link"
-    emailBrakeTripped: false,   // more than EMAIL_BRAKE rows qualified: no labels this run
-    emailSkippedAlreadyLabelled: 0, // new rows whose Send Email already said "Status link"
-    rateLimited: false,         // Monday rate-limited a write this run
-    cacheLargestShard: 0,       // bytes in the largest cache shard (limit about 100 KB)
-    unknownLabels: { fa: {}, testing: {}, dvp: {} }, // board label -> count
-    errorCodes: {},             // error code -> count
-    ms: 0                       // run time in milliseconds
-  };
-}
-
-/**
- * The FA column ids to request: the allow-list plus Send Email, plus
- * STATUS_LINK_COLUMN_ID when a config is given.
- *
- * @param {?Object} cfg Config from readConfig_(), or null for the fixed list.
- * @return {Array<string>} Column ids.
- */
-function faReadColumnIds_(cfg) {
-  const ids = Object.keys(FA_COLUMNS).map((key) => FA_COLUMNS[key]);
-  if (cfg && cfg.statusLinkColumnId && ids.indexOf(cfg.statusLinkColumnId) === -1) ids.push(cfg.statusLinkColumnId);
-  return ids;
-}
-
-/**
- * The DVP column ids to request, plus DVP_LINK_COLUMN_ID when a config is
- * given.
- *
- * @param {?Object} cfg Config from readConfig_(), or null for the fixed list.
- * @return {Array<string>} Column ids.
- */
-function dvpReadColumnIds_(cfg) {
-  const ids = Object.keys(DVP_COLUMNS).map((key) => DVP_COLUMNS[key]);
-  if (cfg && cfg.dvpLinkColumnId && ids.indexOf(cfg.dvpLinkColumnId) === -1) ids.push(cfg.dvpLinkColumnId);
-  return ids;
-}
-
-/**
- * Drops repeated items (same id), keeping the first. Pagination should never
- * repeat an item, but a repeat would otherwise look like a duplicate code.
- *
- * @param {Array<Object>} rows Raw items.
- * @return {Array<Object>} Items with unique ids.
- */
-function uniqueById_(rows) {
-  const seen = {};
-  return rows.filter((row) => {
-    if (!row || typeof row !== 'object') return false;
-    const id = String(row.id);
-    if (hasOwn_(seen, id)) return false;
-    seen[id] = true;
-    return true;
-  });
-}
-
-/**
- * Groups DVP items by the FA item ids in their Connect boards cell. An item
- * connected to two FA rows appears under both.
- *
- * @param {Array<Object>} dvpRows Raw DVP items.
- * @param {string} linkColumnId DVP_LINK_COLUMN_ID.
- * @param {Object} stats Run stats (dvpUnlinked is counted here).
- * @return {Object<string, Array<Object>>} FA item id -> raw DVP items.
- */
-function groupDvpByFaId_(dvpRows, linkColumnId, stats) {
-  const byFaId = {};
-  dvpRows.forEach((row) => {
-    const column = columnMap_(row)[linkColumnId];
-    const ids = column && Array.isArray(column.linked_item_ids) ? column.linked_item_ids : [];
-    const seen = {};
-    ids.forEach((rawId) => {
-      const id = String(rawId);
-      if (!id || hasOwn_(seen, id)) return;
-      seen[id] = true;
-      if (!hasOwn_(byFaId, id)) byFaId[id] = [];
-      byFaId[id].push(row);
-    });
-    if (!Object.keys(seen).length) stats.dvpUnlinked++;
-  });
-  return byFaId;
-}
-
-/**
- * What the pipeline needs to know about one FA row's link.
- *
- * @param {Object} cfg Config from readConfig_().
- * @param {Object} row Raw FA item.
- * @return {{row: Object, code: ?string, columnMissing: boolean,
- *     sendEmail: ?string, createdMs: ?number}} code follows codeFromCell_
- *     (a code, '' for empty, null for unreadable).
- */
-function linkEntry_(cfg, row) {
-  const cols = columnMap_(row);
-  const cell = hasOwn_(cols, cfg.statusLinkColumnId) ? cols[cfg.statusLinkColumnId] : null;
-  return {
-    row: row,
-    code: codeFromCell_(cell),
-    columnMissing: cell === null,
-    sendEmail: statusText_(cols[FA_COLUMNS.sendEmail]),
-    createdMs: parseIsoMs_(row.created_at)
-  };
-}
-
-/**
- * Write mode: gives every empty Status link a new code and writes it to
- * Monday (Appendix B #5 and #6).
- *
- *   - Only empty cells get codes; unreadable ones are never overwritten.
- *   - At most WRITE_CAP_PER_RUN rows per run, newest rows first, so new
- *     applicants are never held back by the backfill of old rows.
- *   - Rows chosen by chooseEmailRows_ get Send Email = "Status link" in the
- *     same write. If such a write fails with missingLabel, that row's link is
- *     retried on its own.
- *   - A row whose write failed keeps its empty cell: it is not served this
- *     run and is tried again next run.
- *
- * Updates entries[].code and codeCounts in place for rows whose link was
- * saved, so the views step serves them straight away.
- *
- * @param {Object} cfg Config from readConfig_().
- * @param {Array<Object>} entries From linkEntry_(), one per FA row.
- * @param {Object<string, number>} codeCounts Code -> rows carrying it.
- * @param {Object} stats Run stats.
- */
-function writeNewLinks_(cfg, entries, codeCounts, stats) {
-  if (cfg.sendLinkEmail && cfg.emailNewRowsFrom === null) countInto_(stats.errorCodes, 'email_from_invalid');
-
-  const candidates = entries.filter((entry) => entry.code === '').sort(newestFirst_);
-  const planned = candidates.slice(0, WRITE_CAP_PER_RUN);
-  stats.linksPlanned = planned.length;
-  stats.rowsDeferredByCap = candidates.length - planned.length;
-  if (!planned.length) return;
-
-  const emailIds = chooseEmailRows_(cfg, planned, stats);
-
-  // Every code already on the board (duplicates included) counts as taken.
-  const taken = {};
-  Object.keys(codeCounts).forEach((code) => { taken[code] = true; });
-
-  const plans = planned.map((entry) => {
-    const code = newCode_(taken);
-    taken[code] = true;
-    const itemId = String(entry.row.id);
-    const withLabel = hasOwn_(emailIds, itemId);
-    return { entry: entry, itemId: itemId, code: code, withLabel: withLabel };
-  });
-
-  const first = writeColumnBatches_(cfg, cfg.faBoardId, plans.map((plan) => ({
-    itemId: plan.itemId,
-    values: linkValues_(cfg, plan.code, plan.withLabel)
-  })));
-  if (first.rateLimited) stats.rateLimited = true;
-  const finals = first.results.slice();
-  const labelled = plans.map((plan) => plan.withLabel);
-
-  // A missing "Status link" label fails the whole combined write: retry the link alone.
-  const retryIndexes = [];
-  first.results.forEach((result, i) => {
-    if (!result.ok && result.missingLabel && plans[i].withLabel) retryIndexes.push(i);
-  });
-  if (retryIndexes.length) {
-    countInto_(stats.errorCodes, 'missingLabel', retryIndexes.length);
-    if (!first.stopped) {
-      const retry = writeColumnBatches_(cfg, cfg.faBoardId, retryIndexes.map((i) => ({
-        itemId: plans[i].itemId,
-        values: linkValues_(cfg, plans[i].code, false)
-      })));
-      if (retry.rateLimited) stats.rateLimited = true;
-      retry.results.forEach((result, k) => {
-        finals[retryIndexes[k]] = result;
-        labelled[retryIndexes[k]] = false;
-      });
-    }
-  }
-
-  // Tally. Only saved codes are served.
-  plans.forEach((plan, i) => {
-    const result = finals[i];
-    if (result.ok) {
-      plan.entry.code = plan.code;
-      codeCounts[plan.code] = 1;
-      stats.linksWritten++;
-      if (labelled[i]) stats.emailLabelsSet++;
-    } else if (result.errorCode === 'not_sent') {
-      stats.rowsNotSent++;
-    } else {
-      stats.linkWriteFailures++;
-      countInto_(stats.errorCodes, result.errorCode || 'unknown');
-    }
-  });
-}
-
-/**
- * Decides which rows get Send Email = "Status link" with their new link
- * (Appendix B #5). A row qualifies only when all of these hold:
- *   - SEND_LINK_EMAIL is "true" and EMAIL_NEW_ROWS_FROM parses as a date;
- *   - its link is being written in this run (it is in `planned`);
- *   - it was created on or after EMAIL_NEW_ROWS_FROM;
- *   - its Send Email is not already "Status link" (an unchanged label would
- *     not fire the automation);
- *   - Send Email has an active "Status link" label (read once per run, and
- *     only when some row would qualify).
- * Brake: if more than EMAIL_BRAKE rows qualify, no row gets the label (their
- * links are still written) and 'email_brake' is logged. This prevents a mass
- * email caused by a mis-set date.
- *
- * @param {Object} cfg Config from readConfig_().
- * @param {Array<Object>} planned Entries whose links are written this run.
- * @param {Object} stats Run stats.
- * @return {Object<string, boolean>} Item id -> true for rows to label.
- */
-function chooseEmailRows_(cfg, planned, stats) {
-  const chosen = {};
-  if (!cfg.sendLinkEmail || cfg.emailNewRowsFrom === null) return chosen;
-
-  const recent = planned.filter((entry) => entry.createdMs !== null && entry.createdMs >= cfg.emailNewRowsFrom);
-  const qualifying = recent.filter((entry) => entry.sendEmail !== STATUS_LINK_TEXT);
-  stats.emailSkippedAlreadyLabelled = recent.length - qualifying.length;
-  if (!qualifying.length) return chosen;
-
-  if (!sendEmailLabelReady_(cfg, stats)) return chosen;
-  stats.emailQualified = qualifying.length;
-  if (qualifying.length > EMAIL_BRAKE) {
-    stats.emailBrakeTripped = true;
-    countInto_(stats.errorCodes, 'email_brake');
-    return chosen;
-  }
-  qualifying.forEach((entry) => { chosen[String(entry.row.id)] = true; });
-  return chosen;
-}
-
-/**
- * Reads the Send Email column settings (once per run) and checks for an
- * active "Status link" label. Labels are never created through the API, so
- * without it links are written without the label.
- *
- * @param {Object} cfg Config from readConfig_().
- * @param {Object} stats Run stats (records 'status_link_label_missing' or
- *     'send_email_settings_unreadable').
- * @return {boolean} True when the label can be used.
- */
-function sendEmailLabelReady_(cfg, stats) {
-  let columns;
-  try {
-    columns = readColumns_(cfg, cfg.faBoardId, [FA_COLUMNS.sendEmail]);
-  } catch (err) {
-    countInto_(stats.errorCodes, 'send_email_settings_unreadable');
-    return false;
-  }
-  if (hasActiveLabel_(findColumn_(columns, FA_COLUMNS.sendEmail), STATUS_LINK_TEXT)) return true;
-  countInto_(stats.errorCodes, 'status_link_label_missing');
-  return false;
-}
-
-/**
- * Sort order for link writes: newest created_at first, rows without a
- * created_at last. Ties keep the board order (the sort is stable).
- *
- * @param {Object} a An entry from linkEntry_().
- * @param {Object} b An entry from linkEntry_().
- * @return {number} Negative when a comes first.
- */
-function newestFirst_(a, b) {
-  if (a.createdMs === b.createdMs) return 0;
-  if (a.createdMs === null) return 1;
-  if (b.createdMs === null) return -1;
-  return b.createdMs - a.createdMs;
-}
-
-// =============================================================================
 // 9. Cache
 // =============================================================================
 
 /**
- * The cache key of the shard that holds a code: CACHE_PREFIX plus the char
+ * The cache key of the shard that holds a token: CACHE_PREFIX plus the char
  * code of its first character (64 shards; char codes avoid any question of
  * key case-sensitivity).
  *
- * @param {string} code A code matching CODE_RE.
- * @return {string} E.g. 'fa1:65' for a code starting with 'A'.
+ * @param {string} token A token matching TOKEN_RE.
+ * @return {string} E.g. 'fa2:65' for a token starting with 'A'.
  */
-function shardKeyFor_(code) {
-  return CACHE_PREFIX + code.charCodeAt(0);
+function shardKeyFor_(token) {
+  return CACHE_PREFIX + token.charCodeAt(0);
 }
 
 /**
- * Writes all 64 shards in one putAll, {} for empty ones, so codes that were
- * cleared on Monday disappear from the cache. Each value is a JSON map of
- * code -> app object, and expires after CACHE_TTL_S.
+ * Writes all 64 shards in one putAll, {} for empty ones, so addresses removed
+ * from Monday lose access on the next run. Each value is a JSON map of
+ * token -> {apps}, and expires after CACHE_TTL_S.
  *
- * @param {Object<string, Object>} views Code -> app object.
+ * @param {Object<string, Object>} views Token -> entry.
  * @return {number} Size in bytes of the largest shard (for the log).
  * @throws {Error} 'cache_shard_too_large' if a shard exceeds the value limit.
  */
@@ -1991,9 +1627,9 @@ function writeCache_(views) {
   for (let i = 0; i < BASE64URL_ALPHABET.length; i++) {
     shards[shardKeyFor_(BASE64URL_ALPHABET.charAt(i))] = {};
   }
-  Object.keys(views).forEach((code) => {
-    const key = shardKeyFor_(code);
-    if (hasOwn_(shards, key)) shards[key][code] = views[code];
+  Object.keys(views).forEach((token) => {
+    const key = shardKeyFor_(token);
+    if (hasOwn_(shards, key)) shards[key][token] = views[token];
   });
 
   const values = {};
@@ -2008,14 +1644,14 @@ function writeCache_(views) {
 }
 
 /**
- * Reads the shard that would hold a code.
+ * Reads the shard that would hold a token.
  *
- * @param {string} code A code matching CODE_RE.
- * @return {?Object<string, Object>} The shard's code -> app map, or null when
- *     the shard is missing or unreadable (a cache miss).
+ * @param {string} token A token matching TOKEN_RE.
+ * @return {?Object<string, Object>} The shard's token -> entry map, or null
+ *     when the shard is missing or unreadable (a cache miss).
  */
-function readShard_(code) {
-  const raw = CacheService.getScriptCache().get(shardKeyFor_(code));
+function readShard_(token) {
+  const raw = CacheService.getScriptCache().get(shardKeyFor_(token));
   if (typeof raw !== 'string') return null;
   const map = parseJson_(raw);
   return map && typeof map === 'object' && !Array.isArray(map) ? map : null;
@@ -2050,8 +1686,30 @@ function utf8Length_(text) {
 // =============================================================================
 
 /**
- * Prints one JSON line for a run: counts, flags, unknown board labels and
- * error codes only. Never codes, names, URLs or Monday error messages.
+ * A fresh stats object for one run. Counts only.
+ *
+ * @param {string} mode 'refresh' or 'rebuild'.
+ * @return {Object} The stats.
+ */
+function newStats_(mode) {
+  return {
+    mode: mode,
+    stage: 'start',
+    faRows: 0,            // FA items read
+    dvpRows: 0,           // DVP items read
+    appsServed: 0,        // FA rows with at least one email address
+    appsWithoutEmail: 0,  // FA rows nobody can reach (no address on the row)
+    addresses: 0,         // distinct addresses that can get a link
+    dvpMatched: 0,        // DVP requests attached to at least one FA app
+    dvpUnmatched: 0,      // DVP requests whose name matches no FA app
+    cacheLargestShard: 0, // bytes
+    ms: 0,
+    unknownLabels: { fa: {}, testing: {}, dvp: {} }
+  };
+}
+
+/**
+ * Prints one JSON line for a run: counts and unknown board labels only.
  * Failed runs go to console.error, with the error kind and the stage reached.
  *
  * @param {Object} stats Run stats from newStats_().
@@ -2060,15 +1718,13 @@ function utf8Length_(text) {
 function logRun_(stats, errorKind) {
   const line = { event: LOG_EVENT, mode: String(stats.mode) };
   Object.keys(stats).forEach((key) => {
-    const value = stats[key];
-    if (typeof value === 'number' || typeof value === 'boolean') line[key] = value;
+    if (typeof stats[key] === 'number') line[key] = stats[key];
   });
   line.unknownLabels = {
     fa: countsOnly_(stats.unknownLabels.fa),
     testing: countsOnly_(stats.unknownLabels.testing),
     dvp: countsOnly_(stats.unknownLabels.dvp)
   };
-  line.errorCodes = countsOnly_(stats.errorCodes);
   if (errorKind) {
     line.error = errorKind;
     line.stage = String(stats.stage);
@@ -2093,18 +1749,6 @@ function countsOnly_(map) {
 }
 
 /**
- * Adds to a key -> count map.
- *
- * @param {Object<string, number>} map The map (e.g. stats.errorCodes).
- * @param {string} key The key (an error code or a board label).
- * @param {number=} amount How much to add (default 1).
- */
-function countInto_(map, key, amount) {
-  const safeKey = key === '__proto__' ? '_proto_' : key; // never touch the prototype
-  map[safeKey] = (hasOwn_(map, safeKey) ? map[safeKey] : 0) + (amount || 1);
-}
-
-/**
  * Counts a board label that has no mapping. Board labels are not applicant
  * data, so they may be logged (capped at LOG_LABEL_MAX characters).
  *
@@ -2114,7 +1758,10 @@ function countInto_(map, key, amount) {
  */
 function noteUnknownLabel_(stats, bucket, label) {
   if (!stats || !stats.unknownLabels || !stats.unknownLabels[bucket]) return;
-  countInto_(stats.unknownLabels[bucket], label.slice(0, LOG_LABEL_MAX));
+  const map = stats.unknownLabels[bucket];
+  const key = label.slice(0, LOG_LABEL_MAX);
+  const safeKey = key === '__proto__' ? '_proto_' : key; // never touch the prototype
+  map[safeKey] = (hasOwn_(map, safeKey) ? map[safeKey] : 0) + 1;
 }
 
 /**
@@ -2145,8 +1792,7 @@ function errorKind_(err) {
 }
 
 /**
- * Restricts a code to a short, safe set of characters before it is logged or
- * used as a key.
+ * Restricts a code to a short, safe set of characters before it is logged.
  *
  * @param {*} code An error code or kind.
  * @return {string} Letters, digits and _ . : - only, at most 80 characters,

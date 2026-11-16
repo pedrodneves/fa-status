@@ -1,0 +1,418 @@
+/* ==========================================================================
+   Featured App Status: page styles
+
+   The look follows the v0.3 mockup (the portal inside its browser frame),
+   rebuilt as a full page:
+   - system fonts only, so the page loads nothing from third parties;
+   - mobile first: base rules target phones (16px side gutters), and the
+     min-width query near the end adds room on wider screens;
+   - light and dark themes from the same tokens (prefers-color-scheme);
+   - no inline styles anywhere (the CSP allows only this file), so every
+     visual variation is a class here.
+   ========================================================================== */
+
+/* ---- Design tokens: light theme ---------------------------------------- */
+:root {
+  --surface: #FFFFFF;      /* page background */
+  --surface-2: #F7F9FA;    /* status box */
+  --ink: #15202B;          /* body text */
+  --muted: #5A6774;        /* secondary text */
+  --line: #DAE0E6;         /* borders, timeline connectors */
+  --accent: #1F4F8F;       /* links, brand, current step */
+  --accent-ink: #FFFFFF;   /* text on accent */
+  --accent-soft: #E4ECF6;  /* "info" pill background */
+  --ok: #1E7A4C;   --ok-soft: #E1F2E8;
+  --warn: #965800; --warn-soft: #FAEFD9;
+  --bad: #B0281F;  --bad-soft: #FBE5E2;
+  --idle: #5F6B77; --idle-soft: #E9EDF1;
+
+  --font-display: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-body: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  color-scheme: light dark;
+}
+
+/* ---- Design tokens: dark theme ----------------------------------------- */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #161E26;
+    --surface-2: #121A21;
+    --ink: #E5EAEF;
+    --muted: #98A4B0;
+    --line: #29343F;
+    --accent: #86AEEA;
+    --accent-ink: #0E141A;
+    --accent-soft: #1A2A40;
+    --ok: #62C892;   --ok-soft: #15302A;
+    --warn: #E6A64E; --warn-soft: #33270F;
+    --bad: #F08B81;  --bad-soft: #3A1C1A;
+    --idle: #A0AAB4; --idle-soft: #212A33;
+  }
+}
+
+/* ---- Base --------------------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* The hidden attribute must win over any display rule below (e.g. .p-user). */
+[hidden] { display: none !important; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--surface);
+  color: var(--ink);
+  font: 400 16px/1.55 var(--font-body);
+  overflow-wrap: break-word; /* long words never push the page sideways */
+}
+
+a { color: var(--accent); text-underline-offset: 2px; }
+a:hover { text-decoration-thickness: 2px; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+h1, h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+p, dl, dd { margin: 0; }
+
+.mono { font-family: var(--font-mono); font-size: .86em; }
+
+/* Text for screen readers only (e.g. the state of each timeline step). */
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---- Header bar --------------------------------------------------------- */
+.p-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: calc(12px + env(safe-area-inset-top, 0px))
+           max(16px, env(safe-area-inset-right, 0px))
+           12px
+           max(16px, env(safe-area-inset-left, 0px));
+  border-bottom: 1px solid var(--line);
+}
+
+.p-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font: 600 15px/1 var(--font-display);
+}
+
+/* Brand mark: a rounded accent square with a ring. */
+.p-mark {
+  position: relative;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--accent);
+}
+.p-mark::after {
+  content: "";
+  position: absolute;
+  top: 6px; right: 6px; bottom: 6px; left: 6px;
+  border: 2px solid var(--accent-ink);
+  border-radius: 50%;
+}
+
+/* "Private link" badge, shown on application and DVP pages only. */
+.p-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.p-user svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---- Main column -------------------------------------------------------- */
+.p-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 22px;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 24px
+           max(16px, env(safe-area-inset-right, 0px))
+           calc(32px + env(safe-area-inset-bottom, 0px))
+           max(16px, env(safe-area-inset-left, 0px));
+}
+
+/* Narrow column for short screens: loading, invalid link, errors. */
+.p-narrow { max-width: 440px; padding-top: 32px; }
+
+.p-h {
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+/* Headings get focus from script after each render so screen readers start
+   there; they are not interactive, so no focus ring. */
+.p-h:focus { outline: none; }
+
+.p-sub { color: var(--muted); }
+.p-fine { font-size: 14px; color: var(--muted); }
+.p-foot { padding-top: 16px; border-top: 1px solid var(--line); }
+
+/* Buttons (and links styled as buttons). */
+.p-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: start;
+  max-width: 100%;
+  padding: 12px 18px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: 600 16px/1.25 var(--font-body);
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.p-btn:hover { text-decoration: none; filter: brightness(1.08); }
+.p-btn.secondary { background: transparent; color: var(--accent); border-color: var(--line); }
+.p-btn.secondary:hover { border-color: var(--accent); filter: none; }
+
+/* ---- Page heading block -------------------------------------------------- */
+.d-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.d-eyebrow {
+  font: 500 12px/1.4 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted);
+}
+.d-meta { font-size: 15px; color: var(--muted); }
+/* Shrink-wrapped items size to their longest word, so let long names break. */
+.back { justify-self: start; max-width: 100%; overflow-wrap: anywhere; }
+
+/* ---- Status box ---------------------------------------------------------- */
+.status-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.status-box > .pill,
+.status-box > .status-action { justify-self: start; max-width: 100%; }
+.status-box > .status-action { overflow-wrap: anywhere; }
+.status-box .when { font-size: 13px; color: var(--muted); }
+
+/* ---- Pills --------------------------------------------------------------- */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 10px;
+  border: 1px solid transparent; /* becomes visible in forced-colours mode */
+  border-radius: 999px;
+  font: 600 13px/1.3 var(--font-body);
+  white-space: nowrap;
+}
+.pill::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.pill.info { color: var(--accent); background: var(--accent-soft); }
+.pill.ok   { color: var(--ok);     background: var(--ok-soft); }
+.pill.warn { color: var(--warn);   background: var(--warn-soft); }
+.pill.bad  { color: var(--bad);    background: var(--bad-soft); }
+.pill.idle { color: var(--idle);   background: var(--idle-soft); }
+
+/* ---- Timeline (ol.tl) ---------------------------------------------------- */
+.tl { list-style: none; margin: 0; padding: 0; display: grid; }
+.tl li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 12px;
+  padding-bottom: 18px;
+}
+.tl li:last-child { padding-bottom: 0; }
+
+/* Connector line from each step down to the next one. */
+.tl li::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 22px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--line);
+}
+.tl li:last-child::before { display: none; }
+.tl li.done::before { background: var(--ok); }
+
+/* Step dot: done = green tick, current = accent ring with a dot,
+   todo = empty ring, stop = grey with a bar. */
+.tl .dot {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface);
+}
+.tl .done .dot { border-color: var(--ok); background: var(--ok); }
+.tl .done .dot::after {
+  content: "";
+  width: 8px;
+  height: 4px;
+  border-left: 2px solid var(--surface);
+  border-bottom: 2px solid var(--surface);
+  transform: rotate(-45deg) translate(1px, -1px);
+}
+.tl .current .dot { border-color: var(--accent); }
+.tl .current .dot::after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.tl .stop .dot { border-color: var(--idle); background: var(--idle); }
+.tl .stop .dot::after { content: ""; width: 10px; height: 2px; background: var(--surface); }
+
+.tl .t { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; padding-top: 2px; }
+.tl-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+.tl-title { font-weight: 600; }
+.tl-detail { font-size: 14px; color: var(--muted); }
+.tl .todo .tl-title { color: var(--muted); font-weight: 500; }
+.tl .current .tl-title { color: var(--accent); }
+.tl .pill { gap: 6px; padding: 1px 8px; font-size: 12px; }
+
+/* ---- Sections below the timeline ---------------------------------------- */
+.p-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.p-section h2 { font: 600 15px/1.3 var(--font-display); }
+
+/* "On file" key/value list. */
+.kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 18px;
+  font-size: 15px;
+}
+.kv dt { color: var(--muted); }
+.kv dd { min-width: 0; overflow-wrap: anywhere; }
+
+/* URLs shown as link text (product site, mailing-list post). */
+.url-text { overflow-wrap: anywhere; }
+
+/* "Public record" line on a DVP page. */
+.record { color: var(--ink); }
+
+/* ---- DVP request cards on the application page -------------------------- */
+.app-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.app {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 6px 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+}
+a.app:hover { border-color: var(--accent); }
+a.app:hover .app-name { text-decoration: underline; text-underline-offset: 2px; }
+.app-name { font: 600 17px/1.3 var(--font-display); overflow-wrap: anywhere; }
+.app-meta { font-size: 14px; color: var(--muted); }
+.app .pill { justify-self: start; }
+
+/* ---- Loading ------------------------------------------------------------- */
+.loading {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  padding: 48px 0;
+  color: var(--muted);
+  text-align: center;
+}
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .spinner { animation: fa-spin .8s linear infinite; }
+  @keyframes fa-spin { to { transform: rotate(360deg); } }
+}
+
+/* ---- Wider screens -------------------------------------------------------- */
+@media (min-width: 561px) {
+  .p-top {
+    padding-top: calc(14px + env(safe-area-inset-top, 0px));
+    padding-bottom: 14px;
+    padding-left: max(24px, env(safe-area-inset-left, 0px));
+    padding-right: max(24px, env(safe-area-inset-right, 0px));
+  }
+  .p-body {
+    padding-top: 32px;
+    padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+    padding-left: max(28px, env(safe-area-inset-left, 0px));
+    padding-right: max(28px, env(safe-area-inset-right, 0px));
+  }
+  .p-narrow { padding-top: 64px; }
+
+  /* DVP cards: name and date on the left, the pill on the right. */
+  .app { grid-template-columns: minmax(0, 1fr) auto; }
+  .app-meta { grid-column: 1; }
+  .app .pill { grid-row: 1 / span 2; grid-column: 2; justify-self: end; }
+}

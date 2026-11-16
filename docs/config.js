@@ -16,7 +16,7 @@ window.FA_STATUS_CONFIG = Object.freeze({
    * It must stay on https://script.google.com, the only API host the page's
    * Content-Security-Policy (connect-src in index.html) allows.
    */
-  apiUrl: 'https://script.google.com/macros/s/REPLACE_WITH_DEPLOYMENT_ID/exec',
+  apiUrl: 'https://script.google.com/macros/s/AKfycbxoVmCyM4vyiTmKC9vurUtg4cFkgepEmmt0ehBEHvxC-maJGfu7vW0nc8C8JleebyPw/exec',
 
   /*
    * Where applicants write to the Featured App team: no email arriving,

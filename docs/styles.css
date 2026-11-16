@@ -522,6 +522,10 @@ p, dl, dd { margin: 0; }
 .kv dt { color: var(--muted); }
 .kv dd { min-width: 0; overflow-wrap: anywhere; }
 
+/* "DVP status" line at the top of the DVP section. */
+.dvp-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.dvp-status-label { font-size: 15px; color: var(--muted); }
+
 /* URLs shown as link text (product site, mailing-list post). */
 .url-text { overflow-wrap: anywhere; }
 

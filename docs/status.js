@@ -28,7 +28,7 @@
  *                  still has the placeholder apiUrl
  *
  * Answer shapes (see "Response contract" in DESIGN.md):
- *   GET  { found: true, apps: [{ id, name, institution, type, submitted, state,
+ *   GET  { found: true, apps: [{ id, name, institution, type, faType, dvpStatus, submitted, state,
  *                                lock, testing, partyId, website, announcement,
  *                                update: { kind, date } | null,
  *                                updated, dvp: [{ id, name, state, submitted,
@@ -139,9 +139,21 @@
       untitled: 'Untitled application',  // only if the app has no name
       progressLabel: 'Application progress',
       onFile: 'On file',
+      faType: 'Featured App type',
       partyId: 'Party ID',
       productSite: 'Product site',
-      dvpHeading: 'DVP requests for this app',
+      dvpHeading: 'DVP',
+
+      // The app's DVP status (the DVP Status column on the FA board).
+      // Unknown values show nothing.
+      dvpStatus: {
+        label: 'DVP status',
+        states: {
+          in_review: { label: 'In committee review', tone: 'info' },
+          faac_approved: { label: 'Approved by the Featured App Committee', tone: 'ok' },
+          declined: { label: 'Declined', tone: 'bad' }
+        }
+      },
 
       // FA states (the backend maps the FA Status column to these keys).
       // Any other value is shown as in_review.
@@ -1002,9 +1014,16 @@
     ]);
   }
 
-  /** "On file": Party ID and product site; null when both are missing. */
+  /** "On file": Featured App type, Party ID and product site; null when all are missing. */
   function onFileSection(app) {
     const rows = [];
+    const faType = textOf(app.faType);
+    if (faType) {
+      rows.push(
+        el('dt', { text: TEXT.fa.faType }),
+        el('dd', { 'data-field': 'fa-type', text: faType })
+      );
+    }
     const partyId = textOf(app.partyId);
     if (partyId) {
       rows.push(
@@ -1022,10 +1041,23 @@
     return rows.length ? section('on-file', TEXT.fa.onFile, el('dl', { class: 'kv' }, rows)) : null;
   }
 
-  /** "DVP requests for this app": one card per request; null when there are none. */
+  /**
+   * "DVP": the app's DVP status (from the FA board), then one card per DVP
+   * request (from the DVP board); null when there is neither.
+   */
   function dvpListSection(code, apps, app) {
     const requests = dvpOf(app);
-    if (requests.length === 0) return null;
+    const statusKey = textOf(app.dvpStatus);
+    const status = hasOwn(TEXT.fa.dvpStatus.states, statusKey) ? TEXT.fa.dvpStatus.states[statusKey] : null;
+    if (requests.length === 0 && !status) return null;
+    const statusLine = status
+      ? el('p', { class: 'dvp-status', 'data-dvp-status': statusKey }, [
+          el('span', { class: 'dvp-status-label', text: TEXT.fa.dvpStatus.label }),
+          ' ',
+          pill(status.label, status.tone, statusKey)
+        ])
+      : null;
+    if (requests.length === 0) return section('dvp', TEXT.fa.dvpHeading, statusLine);
 
     const cards = requests.map(function (request) {
       const state = normalizeState(request.state, TEXT.dvp.states, 'in_review');
@@ -1047,7 +1079,7 @@
         : el('div', { class: 'app' }, content);
       return el('li', null, card);
     });
-    return section('dvp', TEXT.fa.dvpHeading, el('ul', { class: 'app-list' }, cards));
+    return section('dvp', TEXT.fa.dvpHeading, [statusLine, el('ul', { class: 'app-list' }, cards)]);
   }
 
   /** A DVP request's page. */

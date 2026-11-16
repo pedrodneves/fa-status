@@ -14,10 +14,10 @@ const SECRET = 'test-secret-0123456789abcdef0123456789abcdef';
 const PROPS = { MONDAY_API_TOKEN: 'test-token-xyz', SITE_URL: 'https://status.example.org', LINK_SECRET: SECRET };
 
 const ALLOWED_FA = ['text_mm4k2vch', 'color_mm4kmej3', 'color_mm4kpp3q', 'date_mm4kw11a', 'date_mm4kpckv',
-  'numeric_mm4k6919', 'color_mm6be9ge', 'long_text_mm4kq322', 'link_mm4kmq24', 'link_mm6hfp5g', 'color_mm6eay19'];
+  'numeric_mm4k6919', 'color_mm6be9ge', 'long_text_mm4kq322', 'link_mm4kmq24', 'link_mm6hfp5g', 'color_mm6eay19', 'color_mm8z4ket', 'color_mm8a49an'];
 const EMAIL_COLUMNS = ['email_mm4ke170', 'text_mm4kvrar'];
 const ALLOWED_DVP = ['date_mm8dsx4y', 'date_mm8dm7a0', 'link_mm8rp25j', 'color_mm8dhgvr'];
-const APP_KEYS = ['id', 'name', 'institution', 'type', 'submitted', 'state', 'lock', 'testing', 'partyId',
+const APP_KEYS = ['id', 'name', 'institution', 'type', 'faType', 'dvpStatus', 'submitted', 'state', 'lock', 'testing', 'partyId',
   'website', 'announcement', 'update', 'updated', 'dvp'];
 const DVP_KEYS = ['id', 'name', 'state', 'submitted', 'finalApproval', 'requestUrl', 'requestRef', 'updated'];
 
@@ -30,7 +30,8 @@ function fixture() {
         responsible: 'bob@harbor.example; Carol <carol@harbor.example>', status: '1b-FAAC Approved-waiting on tokenomics',
         statusChangedAt: '2026-10-20T10:00:00Z', type: 'Non-Issuer', submitted: '2026-09-01', lockVerified: '2026-09-10',
         lockedAmount: 1.5, testing: 'Done', partyId: 'harbor::1220abcd', website: 'https://harbor.example',
-        announcement: 'https://lists.example/announce/1', sendEmail: 'Office Hour Request', sendEmailChangedAt: '2026-11-12T09:30:00Z'
+        announcement: 'https://lists.example/announce/1', sendEmail: 'Office Hour Request', sendEmailChangedAt: '2026-11-12T09:30:00Z',
+        faType: 'Basic Featured App', dvpStatus: 'FAAC Approved'
       }),
       faItem({
         id: 102, name: 'Harbor Vault', institution: 'Harbor Labs', email: 'alice@harbor.example', status: '2-Approved',
@@ -156,6 +157,18 @@ test('Send Email labels become the latest committee email; labels that send noth
   assert.equal(appsOf(env, 'dev@orbit.example')[0].update, null, '"Working on it" sends no email');
 });
 
+test('DVP Status on the FA board maps to a key; empty and unknown labels give null', () => {
+  const { env } = setupEnv();
+  const status = (label, stats) => env.call('dvpStatusOf_', { id: 'color_mm8a49an', type: 'status', text: label, value: null }, stats);
+  assert.equal(status('Needs Review'), 'in_review');
+  assert.equal(status('FAAC Approved'), 'faac_approved');
+  assert.equal(status('Declined'), 'declined');
+  assert.equal(status(null), null);
+  const stats = env.call('newStats_', 'test');
+  assert.equal(status('Something Else', stats), null);
+  assert.equal(stats.unknownLabels.dvpStatus['Something Else'], 1);
+});
+
 test('DVP name keys: cut at the first qualifier, split on "/", exact matches only', () => {
   const { env } = setupEnv();
   const keys = (name) => Array.from(env.call('dvpNameKeys_', name));
@@ -213,7 +226,7 @@ test('the answer holds only allow-listed fields, links are https-only, approval-
   [vault, swap].forEach((app) => assert.deepEqual(Object.keys(app), APP_KEYS));
 
   assert.deepEqual(swap, {
-    id: '101', name: 'Harbor Swap', institution: 'Harbor Labs', type: 'Non-Issuer', submitted: '2026-09-01',
+    id: '101', name: 'Harbor Swap', institution: 'Harbor Labs', type: 'Non-Issuer', faType: 'Basic Featured App', dvpStatus: 'faac_approved', submitted: '2026-09-01',
     state: 'with_tokenomics', lock: { verified: '2026-09-10', amountMillions: 1.5 }, testing: 'complete',
     partyId: 'harbor::1220abcd', website: 'https://harbor.example', announcement: null,
     update: { kind: 'office_hours', date: '2026-11-12' }, updated: '2026-10-20',

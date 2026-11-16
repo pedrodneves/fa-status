@@ -127,6 +127,8 @@ const FA_COLUMNS = {
   institution: 'text_mm4k2vch',     // Name of Applying Institution (text)
   status: 'color_mm4kmej3',         // FA Status (status), mapped to a state key
   type: 'color_mm4kpp3q',           // Type (status): Non-Issuer / Asset Issuer
+  faType: 'color_mm8z4ket',         // FA Type (status): Basic Featured App / Featured Asset-Moving App / Featured Asset
+  dvpStatus: 'color_mm8a49an',      // DVP Status (status): the app's DVP status, set on the FA board
   submitted: 'date_mm4kw11a',       // "Time stamp" (date)
   lockVerified: 'date_mm4kpckv',    // Lock Verified (date)
   lockedAmount: 'numeric_mm4k6919', // Locked amount (Million) (numbers)
@@ -249,6 +251,13 @@ const DVP_STATE_BY_LABEL = {
 };
 const DVP_STATE_EMPTY = 'in_review';
 const DVP_STATE_UNKNOWN = 'in_review';
+
+/** DVP Status label (on the FA board) -> state. Empty: null (not shown). Unknown: null (logged). */
+const DVP_STATUS_BY_LABEL = {
+  'Needs Review': 'in_review',
+  'FAAC Approved': 'faac_approved',
+  'Declined': 'declined'
+};
 
 /**
  * Send Email label -> the email the committee sent (a Monday automation
@@ -1519,7 +1528,7 @@ function stateFor_(label, map, emptyState, unknownState, stats, bucket) {
  * Builds one application of the answer from a raw FA item. This is the
  * allow-list: only these fields ever leave Apps Script.
  *
- *   id, name, institution, type, submitted, state,
+ *   id, name, institution, type, faType, dvpStatus, submitted, state,
  *   lock {verified, amountMillions}, testing, partyId,
  *   website, announcement, update {kind, date}, updated, dvp[]
  *
@@ -1546,6 +1555,8 @@ function toApplicantView(row, dvpRows, stats) {
     name: capText_(row && row.name, NAME_MAX),
     institution: capText_(textOf_(cols[FA_COLUMNS.institution]), INSTITUTION_MAX),
     type: capText_(statusText_(cols[FA_COLUMNS.type]), LABEL_MAX),
+    faType: capText_(statusText_(cols[FA_COLUMNS.faType]), LABEL_MAX),
+    dvpStatus: dvpStatusOf_(cols[FA_COLUMNS.dvpStatus], stats),
     submitted: dateOf_(cols[FA_COLUMNS.submitted]),
     state: state,
     lock: {
@@ -1565,6 +1576,22 @@ function toApplicantView(row, dvpRows, stats) {
     ]),
     dvp: dvp
   };
+}
+
+/**
+ * The app's DVP status from the FA board's DVP Status column.
+ *
+ * @param {?Object} column Raw DVP Status column value.
+ * @param {Object=} stats Run stats, for unknown-label counting.
+ * @return {?string} 'in_review', 'faac_approved' or 'declined'; null when
+ *     empty or unknown.
+ */
+function dvpStatusOf_(column, stats) {
+  const label = statusText_(column);
+  if (!label) return null;
+  if (hasOwn_(DVP_STATUS_BY_LABEL, label)) return DVP_STATUS_BY_LABEL[label];
+  noteUnknownLabel_(stats, 'dvpStatus', label);
+  return null;
 }
 
 /**
@@ -1744,7 +1771,7 @@ function newStats_(mode) {
     dvpUnmatched: 0,      // DVP requests whose name matches no FA app
     cacheLargestShard: 0, // bytes
     ms: 0,
-    unknownLabels: { fa: {}, testing: {}, dvp: {}, email: {} }
+    unknownLabels: { fa: {}, testing: {}, dvp: {}, dvpStatus: {}, email: {} }
   };
 }
 
@@ -1764,6 +1791,7 @@ function logRun_(stats, errorKind) {
     fa: countsOnly_(stats.unknownLabels.fa),
     testing: countsOnly_(stats.unknownLabels.testing),
     dvp: countsOnly_(stats.unknownLabels.dvp),
+    dvpStatus: countsOnly_(stats.unknownLabels.dvpStatus),
     email: countsOnly_(stats.unknownLabels.email)
   };
   if (errorKind) {
@@ -1794,7 +1822,7 @@ function countsOnly_(map) {
  * data, so they may be logged (capped at LOG_LABEL_MAX characters).
  *
  * @param {Object=} stats Run stats (nothing happens without them).
- * @param {string} bucket 'fa', 'testing', 'dvp' or 'email'.
+ * @param {string} bucket 'fa', 'testing', 'dvp', 'dvpStatus' or 'email'.
  * @param {string} label The unknown label.
  */
 function noteUnknownLabel_(stats, bucket, label) {

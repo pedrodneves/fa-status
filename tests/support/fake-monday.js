@@ -51,13 +51,15 @@ const cv = {
  * A raw FA item in Monday's shape. Every field optional.
  * f = {id, name, institution, email, responsible, status, statusChangedAt, type,
  *      submitted, lockVerified, lockedAmount, testing, partyId, website, announcement,
- *      sendEmail, sendEmailChangedAt}
+ *      sendEmail, sendEmailChangedAt, faType, dvpStatus}
  */
 function faItem(f) {
   const cols = [
     cv.text('text_mm4k2vch', f.institution),
     cv.status('color_mm4kmej3', f.status, f.statusChangedAt),
     cv.status('color_mm4kpp3q', f.type),
+    cv.status('color_mm8z4ket', f.faType),
+    cv.status('color_mm8a49an', f.dvpStatus),
     cv.date('date_mm4kw11a', f.submitted),
     cv.date('date_mm4kpckv', f.lockVerified),
     cv.number('numeric_mm4k6919', f.lockedAmount),

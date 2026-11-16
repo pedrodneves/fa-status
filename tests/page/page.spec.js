@@ -314,6 +314,26 @@ test('the latest committee email shows under the status, with its date; resubmit
   }
 });
 
+test('FA type under "On file"; DVP status at the top of the DVP section, even without DVP requests', async ({ page }, testInfo) => {
+  let body = one({ faType: 'Basic Featured App', dvpStatus: 'faac_approved' });
+  await mockApi(page, (route) => route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify(body) }));
+  await page.goto('/#' + TOKEN);
+  await expect(page.locator('[data-field="fa-type"]')).toHaveText('Basic Featured App');
+  await expect(page.locator('[data-dvp-status="faac_approved"] .pill')).toHaveText('Approved by the Featured App Committee');
+  await expect(page.locator('a.app[data-dvp-id]')).toHaveCount(1);
+  await shot(page, 'app-dvp-status', testInfo);
+
+  body = one({ dvpStatus: 'declined', dvp: [] });
+  await page.goto('/#' + TOKEN.slice(0, 20) + 'm1');
+  await expect(page.locator('[data-section="dvp"] .pill')).toHaveText('Declined');
+  await expect(page.locator('[data-field="fa-type"]')).toHaveCount(0);
+
+  body = one({ dvpStatus: 'something_new', dvp: [] });
+  await page.goto('/#' + TOKEN.slice(0, 20) + 'm2');
+  await expect(page.locator('main h1')).toHaveText('Harbor Swap');
+  await expect(page.locator('[data-section="dvp"]')).toHaveCount(0);
+});
+
 test('testing action_needed shows "Action needed"', async ({ page }) => {
   await mockApi(page, one({ state: 'in_review', testing: 'action_needed', lock: { verified: null, amountMillions: null }, dvp: [] }));
   await page.goto('/#' + TOKEN);

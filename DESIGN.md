@@ -58,6 +58,8 @@ trigger (10 min) ─────────▶ refresh ── read FA + DVP boa
 | website | `link_mm4kmq24` | Product Website |
 | announcement | `link_mm6hfp5g` | FA Link (sent only once approved) |
 | update | `color_mm6eay19` | Send Email (the latest committee email) |
+| faType | `color_mm8z4ket` | FA Type (Basic Featured App / Featured Asset-Moving App / Featured Asset) |
+| dvpStatus | `color_mm8a49an` | DVP Status on the FA board |
 
 **Read but never sent anywhere:** `email_mm4ke170` and `text_mm4kvrar`, which decide who may see a row. **Never requested:** every other column (Entry ID, FAAC notes, tester, Slack fields, Tier, sponsors, tags, form answers…).
 
@@ -104,6 +106,7 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
 
 - **Testing:** empty → `not_started`; Sent Email → `action_needed`; Pending Review or Stuck → `in_progress`; Done → `complete`.
 - **Send Email** (`color_mm6eay19`): each label triggers one email from a Monday automation. The page shows the latest one as "Latest email from the committee", with the date the label was set (`update: {kind, date}`). Mapping: Office Hour Request → `office_hours`, Endorsements → `endorsements`, FA Type Email → `fa_type_info`, Locking Check → `locking_check`, Updated Process → `resubmit`, Decline → `declined`. Working on it, Done, Stuck and empty send nothing and show nothing. The label stays after the applicant replies, so the wording describes what the email asked rather than claiming it's still outstanding.
+- **DVP Status (FA board):** Needs Review → `in_review`, FAAC Approved → `faac_approved`, Declined → `declined`; empty or unknown shows nothing. Shown at the top of the app's DVP section, above any DVP requests matched from the DVP board.
 - **DVP:** New Submission → `in_review`; FAAC Approval → `with_tokenomics`; Tokenomics Apporval (the board's spelling) → `approved`; Denied → `not_approved`; Closed → `closed`.
 
 ## Response contract

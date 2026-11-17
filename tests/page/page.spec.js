@@ -432,6 +432,57 @@ test('DVP page: tiles with the final approval, and a card back to the applicatio
   await expect(page.locator('[data-section="for-app"] .pill')).toHaveText('With Tokenomics Committee');
 });
 
+test('history: every change from the activity log, newest first, older ones folded; lock confirmed by status', async ({ page }) => {
+  const history = [
+    { at: '2026-11-17T12:35:07Z', kind: 'status', to: 'in_review_locked', from: 'in_review' },
+    { at: '2026-11-17T11:26:43Z', kind: 'email', to: 'fa_type_info' },
+    { at: '2026-11-17T11:26:31Z', kind: 'fa_type', text: 'Featured Asset-Moving App' },
+    { at: '2026-11-17T11:26:27Z', kind: 'dvp_status', to: 'in_review' },
+    { at: '2026-10-25T09:00:00Z', kind: 'dvp_state', to: 'with_tokenomics', request: '13557857392' },
+    { at: '2026-10-02T09:00:00Z', kind: 'testing', to: 'complete' },
+    { at: '2026-09-10T08:01:00Z', kind: 'lock_amount', amount: 1.5 },
+    { at: 'not-a-time', kind: 'testing', to: 'complete' },
+    { at: '2026-09-09T08:00:00Z', kind: 'something_new', to: 'x' }
+  ];
+  await page.emulateMedia({ colorScheme: 'light' });
+  await mockApi(page, one({ state: 'in_review', lock: { verified: null, amountMillions: null, confirmed: true }, history: history }));
+  await page.goto('/#' + TOKEN);
+  await expect(page.locator('[data-step="lock"]')).toHaveAttribute('data-step-state', 'done');
+  await expect(page.locator('[data-step="lock"]')).toContainText('Confirmed');
+  await expect(page.locator('.tile').nth(1)).toContainText('Confirmed');
+  await expect(page.locator('[data-section="activity"]')).toHaveCount(0);
+
+  const card = page.locator('[data-section="history"]');
+  const visible = card.locator(':scope > ol.activity > li');
+  await expect(visible).toHaveCount(6);
+  await expect(visible.first()).toContainText('Canton Coin lock confirmed');
+  await expect(visible.first()).toContainText('Status: In committee review');
+  await expect(visible.first().locator('time')).toHaveAttribute('datetime', '2026-11-17T12:35:07Z');
+  await expect(visible.nth(1)).toContainText('Information for Traffic-Based App Rewards');
+  await expect(visible.nth(4)).toContainText('Harbor Swap (RFQ settlement) · With Tokenomics Committee');
+  // 7 valid log entries + the submission + the DVP submission = 9; 6 shown, 3 folded.
+  const more = card.locator('details.history-more');
+  await expect(more.locator('summary')).toHaveText('Show 3 earlier changes');
+  await more.locator('summary').click();
+  await expect(more.locator('li')).toHaveCount(3);
+  await expect(more.locator('li').first()).toContainText('Application submitted');
+  await expect(more.locator('li').last()).toContainText('Locked amount recorded');
+  await expect(card).not.toContainText('something_new');
+});
+
+test('history on the DVP page: the request\'s own status changes', async ({ page }) => {
+  await mockApi(page, one({ history: [
+    { at: '2026-10-25T09:00:00Z', kind: 'dvp_state', to: 'with_tokenomics', request: '13557857392' },
+    { at: '2026-10-26T09:00:00Z', kind: 'dvp_state', to: 'approved', request: '999' },
+    { at: '2026-11-17T12:35:07Z', kind: 'status', to: 'in_review_locked', from: 'in_review' }
+  ] }));
+  await page.goto('/#' + TOKEN + '/dvp-13557857392');
+  const items = page.locator('[data-section="history"] li');
+  await expect(items).toHaveCount(2);
+  await expect(items.first()).toContainText('Approved by the Featured App Committee');
+  await expect(items.last()).toContainText('Request received');
+});
+
 // ------------------------------------------------------------------ failures
 
 test('errors show the retry screen, and "Try again" recovers', async ({ page }, testInfo) => {

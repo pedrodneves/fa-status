@@ -8,7 +8,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
 const { createGasEnv } = require('../support/gas-env');
-const { createFakeMonday, faItem, dvpItem, FA, DVP, SENTINELS } = require('../support/fake-monday');
+const { createFakeMonday, faItem, dvpItem, label, FA, DVP, SENTINELS } = require('../support/fake-monday');
 
 const SECRET = 'test-secret-0123456789abcdef0123456789abcdef';
 const PROPS = { MONDAY_API_TOKEN: 'test-token-xyz', SITE_URL: 'https://status.example.org', LINK_SECRET: SECRET };
@@ -18,7 +18,7 @@ const ALLOWED_FA = ['text_mm4k2vch', 'color_mm4kmej3', 'color_mm4kpp3q', 'date_m
 const EMAIL_COLUMNS = ['email_mm4ke170', 'text_mm4kvrar'];
 const ALLOWED_DVP = ['date_mm8dsx4y', 'date_mm8dm7a0', 'link_mm8rp25j', 'color_mm8dhgvr'];
 const APP_KEYS = ['id', 'name', 'institution', 'type', 'faType', 'dvpStatus', 'submitted', 'state', 'lock', 'testing', 'partyId',
-  'website', 'announcement', 'update', 'updated', 'dvp'];
+  'website', 'announcement', 'update', 'updated', 'dvp', 'history'];
 const DVP_KEYS = ['id', 'name', 'state', 'submitted', 'finalApproval', 'requestUrl', 'requestRef', 'updated'];
 
 /** Seven FA rows and four DVP requests covering the interesting cases. */
@@ -227,10 +227,11 @@ test('the answer holds only allow-listed fields, links are https-only, approval-
 
   assert.deepEqual(swap, {
     id: '101', name: 'Harbor Swap', institution: 'Harbor Labs', type: 'Non-Issuer', faType: 'Basic Featured App', dvpStatus: 'faac_approved', submitted: '2026-09-01',
-    state: 'with_tokenomics', lock: { verified: '2026-09-10', amountMillions: 1.5 }, testing: 'complete',
+    state: 'with_tokenomics', lock: { verified: '2026-09-10', amountMillions: 1.5, confirmed: false }, testing: 'complete',
     partyId: 'harbor::1220abcd', website: 'https://harbor.example', announcement: null,
     update: { kind: 'office_hours', date: '2026-11-12' }, updated: '2026-10-20',
-    dvp: [{ id: '9003', name: 'Harbor Swap (Aug request)', state: 'with_tokenomics', submitted: '2026-08-20', finalApproval: null, requestUrl: null, requestRef: null, updated: null }]
+    dvp: [{ id: '9003', name: 'Harbor Swap (Aug request)', state: 'with_tokenomics', submitted: '2026-08-20', finalApproval: null, requestUrl: null, requestRef: null, updated: null }],
+    history: []
   });
   assert.equal(vault.state, 'approved');
   assert.equal(vault.announcement, 'https://lists.example/vault');
@@ -300,6 +301,114 @@ test('reads every page of a large board', () => {
   assert.equal(stats.faRows, 1203);
   assert.equal(env.requests.filter((r) => /next_items_page/.test(r.payload.query)).length, 2);
   assert.equal(appsOf(env, 'u1202@many.example')[0].name, 'App 1202');
+});
+
+// ---------------------------------------------------------------------------
+// History (activity log, read per link)
+// ---------------------------------------------------------------------------
+
+const HISTORY_FA_COLUMNS = ['color_mm4kmej3', 'color_mm6be9ge', 'date_mm4kpckv', 'numeric_mm4k6919', 'color_mm6eay19', 'color_mm8z4ket', 'color_mm8a49an'];
+
+/** The fixture plus activity-log entries for Harbor Swap (101), its DVP request (9003) and Orbit Ledger (103). */
+function historyFixture() {
+  const data = fixture();
+  data.fa[0] = faItem(Object.assign({}, {
+    id: 101, name: 'Harbor Swap', institution: 'Harbor Labs', email: 'Alice@Harbor.example', status: '0-Locked+Needs Review', submitted: '2026-09-01'
+  }));
+  data.logs = [
+    { item: 101, column: 'color_mm4kmej3', at: '2026-11-17T12:35:07Z', previous: label('1-Needs Review'), value: label('0-Locked+Needs Review') },
+    { item: 101, column: 'color_mm6eay19', at: '2026-11-17T11:26:43Z', previous: label('Locking Check'), value: label('FA Type Email') },
+    { item: 101, column: 'color_mm8z4ket', at: '2026-11-17T11:26:31Z', previous: label('Basic Featured App'), value: label('Featured Asset-Moving App') },
+    { item: 101, column: 'color_mm8a49an', at: '2026-11-17T11:26:27Z', previous: label('FAAC Approved'), value: label('Needs Review') },
+    { item: 101, column: 'color_mm6be9ge', at: '2026-10-02T09:00:00Z', previous: label('Sent Email'), value: label('Done') },
+    { item: 101, column: 'date_mm4kpckv', at: '2026-09-10T08:00:00Z', previous: null, value: { date: '2026-09-10', time: null, changed_at: '2026-09-10T08:00:00Z' } },
+    { item: 101, column: 'numeric_mm4k6919', at: '2026-09-10T08:01:00Z', previous: { value: 0 }, value: { unit: { precision: 1 }, value: 1.5 } },
+    { item: 101, column: 'date_mm4kpckv', at: '2026-11-16T05:19:41Z', previous: { date: '2026-11-15' }, value: { date: '2026-11-16' } },
+    { item: 101, column: 'date_mm4kpckv', at: '2026-11-15T05:00:00Z', previous: { date: '2026-11-14' }, value: { date: '2026-11-15' } },
+    { item: 101, column: 'numeric_mm4k6919', at: '2026-11-01T08:00:00Z', previous: { value: 1.5 }, value: { unit: { precision: 1 }, value: 2 } },
+    { item: 101, column: 'color_mm6eay19', at: '2026-09-05T08:00:00Z', previous: null, value: label('Working on it') },
+    { item: 101, column: 'color_mm4kmej3', at: '2026-09-04T08:00:00Z', previous: label('1-Needs Review'), value: label('1-Needs Review') },
+    { item: 101, column: 'color_mm4kmej3', at: '2026-09-03T08:00:00Z', previous: null, value: null },
+    { item: 101, column: 'text_mm54j2kf', at: '2026-09-02T08:00:00Z', previous: null, value: 'SENTINEL-FAAC-THOUGHTS' },
+    { board: DVP, item: 9003, column: 'color_mm8dhgvr', at: '2026-10-15T10:00:00Z', previous: label('New Submission'), value: label('FAAC Approval') },
+    { item: 103, column: 'color_mm4kmej3', at: '2026-10-01T10:00:00Z', previous: label('1-Needs Review'), value: label('4-No') }
+  ];
+  return data;
+}
+
+test('lock.confirmed: "0-Locked+Needs Review" means the lock is in place, even without a Lock Verified date', () => {
+  const { env } = setupEnv(historyFixture());
+  env.call('refresh');
+  const swap = appsOf(env, 'alice@harbor.example').find((app) => app.id === '101');
+  assert.equal(swap.state, 'in_review');
+  assert.deepEqual(swap.lock, { verified: null, amountMillions: null, confirmed: true });
+  const vault = appsOf(env, 'alice@harbor.example').find((app) => app.id === '102');
+  assert.equal(vault.lock.confirmed, false);
+});
+
+test('history: the link\'s own changes, as keys and dates, newest first; nothing else leaves the script', () => {
+  const { env, monday } = setupEnv(historyFixture());
+  env.call('refresh');
+  const apps = appsOf(env, 'alice@harbor.example');
+  const swap = apps.find((app) => app.id === '101');
+  assert.deepEqual(swap.history, [
+    { at: '2026-11-17T12:35:07Z', kind: 'status', to: 'in_review_locked', from: 'in_review' },
+    { at: '2026-11-17T11:26:43Z', kind: 'email', to: 'fa_type_info' },
+    { at: '2026-11-17T11:26:31Z', kind: 'fa_type', text: 'Featured Asset-Moving App' },
+    { at: '2026-11-17T11:26:27Z', kind: 'dvp_status', to: 'in_review' },
+    { at: '2026-10-15T10:00:00Z', kind: 'dvp_state', to: 'with_tokenomics', request: '9003' },
+    { at: '2026-10-02T09:00:00Z', kind: 'testing', to: 'complete' },
+    { at: '2026-09-10T08:01:00Z', kind: 'lock_amount', amount: 1.5 },
+    { at: '2026-09-10T08:00:00Z', kind: 'lock_verified', date: '2026-09-10' }
+  ], 'no-op changes, cleared cells, labels that send nothing, daily lock re-stamps, amount updates and other columns are left out');
+  assert.deepEqual(apps.find((app) => app.id === '102').history, []);
+
+  // Only this link's items and the history columns were asked for, never an empty item list.
+  const fa = monday.logRequests.filter((r) => r.board === FA);
+  const dvp = monday.logRequests.filter((r) => r.board === DVP);
+  assert.deepEqual(fa.map((r) => r.items.sort()), [['101', '102']]);
+  assert.deepEqual(fa[0].columns, HISTORY_FA_COLUMNS);
+  assert.deepEqual(dvp.map((r) => [r.items, r.columns]), [[['9003'], ['color_mm8dhgvr']]]);
+  monday.logRequests.forEach((r) => assert.ok(r.items.length > 0));
+
+  const text = JSON.stringify(apps) + env.cache.raw() + env.logText();
+  ['SENTINEL-USER-7', 'SENTINEL-PULSE-NAME', 'SENTINEL-COLUMN-TITLE', 'SENTINEL-FAAC-THOUGHTS', '4-No', 'Locking Check'].forEach((s) => assert.ok(text.indexOf(s) === -1, s + ' leaked'));
+});
+
+test('history: cached per link for 10 minutes; another link never sees it', () => {
+  const { env, monday } = setupEnv(historyFixture());
+  env.call('refresh');
+  const token = env.tokenFor('alice@harbor.example');
+  env.get(token);
+  const requests = monday.logRequests.length;
+  env.get(token);
+  assert.equal(monday.logRequests.length, requests, 'second load comes from the cache');
+  assert.equal(env.cache.ttlOf('fa2:hist:' + token), 600);
+
+  const orbit = appsOf(env, 'dev@orbit.example')[0];
+  assert.deepEqual(orbit.history, [{ at: '2026-10-01T10:00:00Z', kind: 'status', to: 'not_approved', from: 'in_review' }]);
+  assert.ok(JSON.stringify(orbit).indexOf('in_review_locked') === -1);
+});
+
+test('history: entries for other items are dropped even if Monday ignored item_ids', () => {
+  const { env, monday } = setupEnv(historyFixture());
+  monday.ignoreItemFilter = true;
+  env.call('refresh');
+  const orbit = appsOf(env, 'dev@orbit.example')[0];
+  assert.equal(orbit.history.length, 1);
+  assert.equal(orbit.history[0].to, 'not_approved');
+});
+
+test('history: if the activity log can\'t be read, the answer goes out without it', () => {
+  const { env, monday } = setupEnv(historyFixture());
+  env.call('refresh');
+  monday.failNext.push({ code: 500, body: 'oops' }, { code: 500, body: 'oops' }, { code: 500, body: 'oops' });
+  const body = env.get(env.tokenFor('alice@harbor.example')).body;
+  assert.equal(body.found, true);
+  assert.equal(body.apps.length, 2);
+  body.apps.forEach((app) => assert.equal(app.history, undefined));
+  assert.ok(env.logText().indexOf('"mode":"history"') !== -1);
+  assert.ok(!env.cache.keys().some((key) => key.indexOf('fa2:hist:') === 0), 'a failure is not cached');
 });
 
 // ---------------------------------------------------------------------------

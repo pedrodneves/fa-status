@@ -156,6 +156,16 @@ const DVP_COLUMNS = {
   status: 'color_mm8dhgvr'        // Status
 };
 
+/**
+ * Columns whose changes make up an application's history (from Monday's
+ * activity log, read when a link is opened). A subset of the allow-list.
+ */
+const FA_HISTORY_COLUMNS = [
+  FA_COLUMNS.status, FA_COLUMNS.testing, FA_COLUMNS.lockVerified, FA_COLUMNS.lockedAmount,
+  FA_COLUMNS.sendEmail, FA_COLUMNS.faType, FA_COLUMNS.dvpStatus
+];
+const DVP_HISTORY_COLUMNS = [DVP_COLUMNS.status];
+
 // -----------------------------------------------------------------------------
 // Monday API
 // -----------------------------------------------------------------------------
@@ -176,6 +186,11 @@ const CACHE_PREFIX = 'fa2:';          // cache key prefix; changing it orphans e
 const CACHE_VALUE_MAX_BYTES = 100000; // CacheService allows 100 KB per value
 const LOCK_WAIT_MS = 20000;           // a request waits this long for the lock on a cache miss
 const REFRESH_LOCK_WAIT_MS = 5000;    // refresh gives up quickly: the next run is 10 minutes away
+const HISTORY_KEY_PREFIX = CACHE_PREFIX + 'hist:'; // + token: that link's history, {appId: [events]}
+const HISTORY_TTL_S = 600;            // history is read again at most every 10 minutes per link
+const HISTORY_PAGE_LIMIT = 100;       // activity log entries per request
+const HISTORY_MAX_PAGES = 5;          // per board and link (500 changes)
+const HISTORY_MAX_PER_APP = 80;       // newest changes kept per application
 
 // Link emails.
 const MAIL_KEY_PREFIX = CACHE_PREFIX + 'mail:'; // + token: when this address was last emailed
@@ -229,6 +244,18 @@ const FA_STATE_BY_LABEL = {
 };
 const FA_STATE_EMPTY = 'received';
 const FA_STATE_UNKNOWN = 'in_review';
+
+/** FA Status labels that mean the Canton Coin lock is confirmed (lock.confirmed). */
+const FA_LOCKED_LABELS = ['0-Locked+Needs Review'];
+
+/**
+ * FA Status label -> history step. The same as FA_STATE_BY_LABEL, except
+ * that "0-Locked+Needs Review" is told apart from "1-Needs Review", so the
+ * history shows the lock being confirmed.
+ */
+const FA_HISTORY_STATUS_BY_LABEL = Object.assign({}, FA_STATE_BY_LABEL, {
+  '0-Locked+Needs Review': 'in_review_locked'
+});
 
 /** Testing Process label -> state. Empty: not_started. Unknown: in_progress (logged). */
 const TESTING_STATE_BY_LABEL = {
@@ -345,6 +372,9 @@ function doGet(e) {
     const token = e && e.parameter && typeof e.parameter.link === 'string' ? e.parameter.link : '';
     // A malformed token can never be in the cache, so answer without touching it.
     body = TOKEN_RE.test(token) ? lookup_(token) : { found: false };
+    // Each application's history, from Monday's activity log. Optional: if it
+    // can't be read, the answer goes out without it.
+    if (body.found) body = withHistory_(token, body);
   } catch (err) {
     console.error(JSON.stringify({ event: LOG_EVENT, mode: 'doGet', error: errorKind_(err) }));
     body = { error: 'unavailable' };
@@ -1529,12 +1559,14 @@ function stateFor_(label, map, emptyState, unknownState, stats, bucket) {
  * allow-list: only these fields ever leave Apps Script.
  *
  *   id, name, institution, type, faType, dvpStatus, submitted, state,
- *   lock {verified, amountMillions}, testing, partyId,
+ *   lock {verified, amountMillions, confirmed}, testing, partyId,
  *   website, announcement, update {kind, date}, updated, dvp[]
  *
  * Texts are capped and empty ones become null. Links are https-only,
  * otherwise null. announcement is only sent once approved. amountMillions is
- * only set when above 0. updated is the latest change among FA Status,
+ * only set when above 0. lock.confirmed is true when the FA Status says the
+ * lock is in place (FA_LOCKED_LABELS). doGet adds history (see 8b). updated
+ * is the latest change among FA Status,
  * Testing Process, Lock Verified and FA Link. dvp is newest first.
  *
  * @param {Object} row Raw FA item {id, name, column_values}.
@@ -1561,7 +1593,9 @@ function toApplicantView(row, dvpRows, stats) {
     state: state,
     lock: {
       verified: dateOf_(cols[FA_COLUMNS.lockVerified]),
-      amountMillions: amount !== null && amount > 0 ? amount : null
+      amountMillions: amount !== null && amount > 0 ? amount : null,
+      // The FA Status says the lock is in place, even if Lock Verified has no date yet.
+      confirmed: FA_LOCKED_LABELS.indexOf(statusText_(cols[FA_COLUMNS.status])) !== -1
     },
     testing: testingState_(statusText_(cols[FA_COLUMNS.testing]), stats),
     partyId: capText_(longTextOf_(cols[FA_COLUMNS.partyId]), PARTY_ID_MAX),
@@ -1662,6 +1696,326 @@ function compareNewestFirst_(a, b) {
   if (x.length !== y.length) return y.length - x.length; // numeric ids: longer is larger
   if (x === y) return 0;
   return x < y ? 1 : -1;
+}
+
+// =============================================================================
+// 8b. History (Monday's activity log, read per link)
+// =============================================================================
+//
+// When a link is opened, the changes of its own items are read from Monday's
+// activity log in one query per board (item_ids = that link's FA items and
+// their DVP requests; column_ids = FA_HISTORY_COLUMNS / DVP_HISTORY_COLUMNS),
+// then cached under the token for HISTORY_TTL_S. Only state keys, dates,
+// amounts and the FA Type label leave this script: never who made a change,
+// never the item name or any other column. History is optional: on any
+// failure the answer goes out without it.
+
+/**
+ * Adds each application's history to a found answer.
+ *
+ * @param {string} token The link's token.
+ * @param {{found: boolean, apps: Array<Object>}} answer From lookup_().
+ * @return {Object} The answer, each app with history: [events], newest
+ *     first; the answer unchanged when the history can't be read.
+ */
+function withHistory_(token, answer) {
+  try {
+    let history = readHistoryCache_(token);
+    if (!history) {
+      history = readHistory_(readConfig_(), answer.apps);
+      if (!history) return answer;
+      writeHistoryCache_(token, history);
+    }
+    return {
+      found: true,
+      apps: answer.apps.map((app) => {
+        const events = hasOwn_(history, app.id) && Array.isArray(history[app.id]) ? history[app.id] : [];
+        return Object.assign({}, app, { history: events });
+      })
+    };
+  } catch (err) {
+    console.error(JSON.stringify({ event: LOG_EVENT, mode: 'history', error: errorKind_(err) }));
+    return answer;
+  }
+}
+
+/**
+ * Reads the history of some applications (and their DVP requests) from
+ * Monday's activity log.
+ *
+ * @param {Object} cfg Config from readConfig_().
+ * @param {Array<Object>} apps Applications of one link (from the cache).
+ * @return {?Object<string, Array<Object>>} App id -> events, newest first,
+ *     at most HISTORY_MAX_PER_APP each; null when Monday can't be read.
+ */
+function readHistory_(cfg, apps) {
+  const faIds = [];
+  const dvpOwners = {}; // DVP request id -> ids of the apps it is attached to
+  apps.forEach((app) => {
+    if (!app || !BOARD_ID_RE.test(String(app.id))) return;
+    faIds.push(String(app.id));
+    (Array.isArray(app.dvp) ? app.dvp : []).forEach((request) => {
+      const id = request ? String(request.id) : '';
+      if (!BOARD_ID_RE.test(id)) return;
+      if (!hasOwn_(dvpOwners, id)) dvpOwners[id] = [];
+      dvpOwners[id].push(String(app.id));
+    });
+  });
+  const result = {};
+  faIds.forEach((id) => { result[id] = []; });
+  if (!faIds.length) return result;
+
+  const faLogs = readActivityLogs_(cfg, cfg.faBoardId, faIds, FA_HISTORY_COLUMNS);
+  if (!faLogs) return null;
+  faLogs.forEach((log) => {
+    const event = faHistoryEvent_(log, result);
+    if (event) result[event.item].push(event.event);
+  });
+
+  const dvpIds = Object.keys(dvpOwners);
+  if (dvpIds.length) {
+    const dvpLogs = readActivityLogs_(cfg, cfg.dvpBoardId, dvpIds, DVP_HISTORY_COLUMNS);
+    if (!dvpLogs) return null;
+    dvpLogs.forEach((log) => {
+      const event = dvpHistoryEvent_(log, dvpOwners);
+      if (event) dvpOwners[event.item].forEach((appId) => result[appId].push(event.event));
+    });
+  }
+
+  Object.keys(result).forEach((id) => {
+    result[id] = result[id].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0)).slice(0, HISTORY_MAX_PER_APP);
+  });
+  return result;
+}
+
+/**
+ * Reads the activity log of some items of one board, newest first, page by
+ * page. item_ids is never empty: an empty list would mean "every item".
+ *
+ * @param {Object} cfg Config from readConfig_().
+ * @param {string} boardId The board.
+ * @param {Array<string>} itemIds The items (at least one).
+ * @param {Array<string>} columnIds The only columns whose changes are read.
+ * @return {?Array<Object>} Raw log entries {event, created_at, data}, or
+ *     null when a page can't be read.
+ */
+function readActivityLogs_(cfg, boardId, itemIds, columnIds) {
+  if (!itemIds.length) return [];
+  const query = 'query ($b: [ID!], $i: [ID!], $c: [String!], $l: Int, $p: Int) { boards(ids: $b) { ' +
+      'activity_logs(item_ids: $i, column_ids: $c, limit: $l, page: $p) { event created_at data } } }';
+  const logs = [];
+  for (let page = 1; page <= HISTORY_MAX_PAGES; page++) {
+    const res = mondayRequest_(cfg, query, { b: [String(boardId)], i: itemIds, c: columnIds, l: HISTORY_PAGE_LIMIT, p: page });
+    try {
+      assertRead_(res);
+    } catch (err) {
+      console.error(JSON.stringify({ event: LOG_EVENT, mode: 'history', error: errorKind_(err) }));
+      return null;
+    }
+    const boards = res.data.boards;
+    const entries = Array.isArray(boards) && boards[0] && Array.isArray(boards[0].activity_logs) ? boards[0].activity_logs : null;
+    if (!entries) return null;
+    entries.forEach((entry) => logs.push(entry));
+    if (entries.length < HISTORY_PAGE_LIMIT) break;
+  }
+  return logs;
+}
+
+/**
+ * One FA log entry as a history event for an app in `allowed`.
+ *
+ *   status        {at, kind, to, from}  history step keys (FA_HISTORY_STATUS_BY_LABEL)
+ *   testing       {at, kind, to}        testing state keys
+ *   lock_verified {at, kind, date}      Lock Verified set from an empty cell (not the daily re-stamps)
+ *   lock_amount   {at, kind, amount}    Locked amount (Million) first set above 0 (from empty or 0)
+ *   email         {at, kind, to}        the committee email kind (EMAIL_UPDATE_BY_LABEL)
+ *   fa_type       {at, kind, text}      the FA Type label (already shown on the page)
+ *   dvp_status    {at, kind, to}        DVP status keys (DVP_STATUS_BY_LABEL)
+ *
+ * Cleared cells, labels that send or mean nothing, and changes that don't
+ * change the key give null.
+ *
+ * @param {Object} log Raw entry {event, created_at, data}.
+ * @param {Object<string, *>} allowed App ids this link may see.
+ * @return {?{item: string, event: Object}} The event and its app id.
+ */
+function faHistoryEvent_(log, allowed) {
+  const entry = logEntry_(log, allowed);
+  if (!entry) return null;
+  const at = entry.at;
+  let event = null;
+  switch (entry.column) {
+    case FA_COLUMNS.status: {
+      const to = historyKey_(logLabel_(entry.value), FA_HISTORY_STATUS_BY_LABEL, FA_STATE_UNKNOWN);
+      const from = historyKey_(logLabel_(entry.previous), FA_HISTORY_STATUS_BY_LABEL, FA_STATE_UNKNOWN);
+      if (to && to !== from) event = { at: at, kind: 'status', to: to, from: from };
+      break;
+    }
+    case FA_COLUMNS.testing: {
+      const to = historyKey_(logLabel_(entry.value), TESTING_STATE_BY_LABEL, TESTING_STATE_UNKNOWN);
+      const from = historyKey_(logLabel_(entry.previous), TESTING_STATE_BY_LABEL, TESTING_STATE_UNKNOWN);
+      if (to && to !== from) event = { at: at, kind: 'testing', to: to };
+      break;
+    }
+    case FA_COLUMNS.lockVerified: {
+      // Only a first verification (from an empty cell): an automation moves
+      // this date forward every day, which would bury every other change.
+      const date = logDate_(entry.value);
+      if (date && !logDate_(entry.previous)) event = { at: at, kind: 'lock_verified', date: date };
+      break;
+    }
+    case FA_COLUMNS.lockedAmount: {
+      // Only an amount first recorded (from empty or 0), for the same reason.
+      const amount = logNumber_(entry.value);
+      const before = logNumber_(entry.previous);
+      if (amount !== null && amount > 0 && !(before !== null && before > 0)) event = { at: at, kind: 'lock_amount', amount: amount };
+      break;
+    }
+    case FA_COLUMNS.sendEmail: {
+      const label = logLabel_(entry.value);
+      const kind = hasOwn_(EMAIL_UPDATE_BY_LABEL, label) ? EMAIL_UPDATE_BY_LABEL[label] : null;
+      if (kind) event = { at: at, kind: 'email', to: kind };
+      break;
+    }
+    case FA_COLUMNS.faType: {
+      const text = capText_(logLabel_(entry.value), LABEL_MAX);
+      if (text) event = { at: at, kind: 'fa_type', text: text };
+      break;
+    }
+    case FA_COLUMNS.dvpStatus: {
+      const label = logLabel_(entry.value);
+      if (hasOwn_(DVP_STATUS_BY_LABEL, label)) event = { at: at, kind: 'dvp_status', to: DVP_STATUS_BY_LABEL[label] };
+      break;
+    }
+    default:
+      break;
+  }
+  return event ? { item: entry.item, event: event } : null;
+}
+
+/**
+ * One DVP board log entry (Status column) as a history event:
+ * {at, kind: 'dvp_state', to, request} with the DVP state key and request id.
+ *
+ * @param {Object} log Raw entry {event, created_at, data}.
+ * @param {Object<string, *>} allowed DVP request ids this link may see.
+ * @return {?{item: string, event: Object}} The event and its request id.
+ */
+function dvpHistoryEvent_(log, allowed) {
+  const entry = logEntry_(log, allowed);
+  if (!entry || entry.column !== DVP_COLUMNS.status) return null;
+  const to = historyKey_(logLabel_(entry.value), DVP_STATE_BY_LABEL, DVP_STATE_UNKNOWN);
+  const from = historyKey_(logLabel_(entry.previous), DVP_STATE_BY_LABEL, DVP_STATE_UNKNOWN);
+  if (!to || to === from) return null;
+  return { item: entry.item, event: { at: entry.at, kind: 'dvp_state', to: to, request: entry.item } };
+}
+
+/**
+ * Reads the parts of a log entry this script uses. Entries for other items,
+ * other events or with an unreadable time are dropped.
+ *
+ * @param {Object} log Raw entry {event, created_at, data}.
+ * @param {Object<string, *>} allowed Item ids this link may see.
+ * @return {?{item: string, column: string, at: string, value: *, previous: *}}
+ */
+function logEntry_(log, allowed) {
+  if (!log || log.event !== 'update_column_value') return null;
+  const data = parseJson_(log.data);
+  if (!data || typeof data !== 'object') return null;
+  const item = data.pulse_id !== undefined && data.pulse_id !== null ? String(data.pulse_id) : '';
+  if (!item || !hasOwn_(allowed, item)) return null; // defence in depth: item_ids already limits this
+  const at = logTime_(log.created_at);
+  if (!at) return null;
+  return { item: item, column: String(data.column_id || ''), at: at, value: data.value, previous: data.previous_value };
+}
+
+/**
+ * Monday's activity log time (a count of 100-nanosecond units, e.g.
+ * "17949189078597722") as an ISO timestamp to the second.
+ *
+ * @param {*} raw The created_at field.
+ * @return {?string} E.g. '2026-11-17T12:35:07Z', or null.
+ */
+function logTime_(raw) {
+  const text = trimmed_(String(raw === undefined || raw === null ? '' : raw));
+  if (!/^\d{16,18}$/.test(text)) return null;
+  const ms = Math.floor(Number(text) / 10000);
+  const date = new Date(ms);
+  const year = date.getUTCFullYear();
+  if (!isFinite(ms) || year < 2020 || year > 2100) return null;
+  return date.toISOString().slice(0, 19) + 'Z';
+}
+
+/**
+ * The label text of a status value in the activity log ({label: {text}}).
+ *
+ * @param {*} value The value or previous_value of a log entry.
+ * @return {string} The trimmed label, or '' when empty.
+ */
+function logLabel_(value) {
+  if (!value || typeof value !== 'object' || !value.label) return '';
+  return typeof value.label === 'string' ? value.label.trim() : trimmed_(value.label.text);
+}
+
+/**
+ * The date of a date value in the activity log ({date: '2026-11-16'}).
+ *
+ * @param {*} value The value or previous_value of a log entry.
+ * @return {string} 'YYYY-MM-DD', or '' when empty or invalid.
+ */
+function logDate_(value) {
+  const date = value && typeof value === 'object' ? trimmed_(value.date) : '';
+  return isIsoDate_(date) ? date : '';
+}
+
+/**
+ * The number of a numbers value in the activity log ({value: 1.5}).
+ *
+ * @param {*} value The value of a log entry.
+ * @return {?number} A finite number, or null.
+ */
+function logNumber_(value) {
+  const raw = value && typeof value === 'object' ? value.value : value;
+  const n = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN;
+  return isFinite(n) ? n : null;
+}
+
+/**
+ * A label's key in a map, `unknown` for any other label, '' when empty.
+ *
+ * @param {string} label The label.
+ * @param {Object<string, ?string>} map Label -> key.
+ * @param {string} unknown The key for labels missing from the map.
+ * @return {string} The key, or ''.
+ */
+function historyKey_(label, map, unknown) {
+  if (!label) return '';
+  return hasOwn_(map, label) ? map[label] || '' : unknown;
+}
+
+/**
+ * The cached history of a link.
+ *
+ * @param {string} token The link's token.
+ * @return {?Object<string, Array<Object>>} App id -> events, or null on a miss.
+ */
+function readHistoryCache_(token) {
+  const raw = CacheService.getScriptCache().get(HISTORY_KEY_PREFIX + token);
+  if (typeof raw !== 'string') return null;
+  const map = parseJson_(raw);
+  return map && typeof map === 'object' && !Array.isArray(map) ? map : null;
+}
+
+/**
+ * Caches a link's history for HISTORY_TTL_S (skipped if over the value limit).
+ *
+ * @param {string} token The link's token.
+ * @param {Object<string, Array<Object>>} history App id -> events.
+ */
+function writeHistoryCache_(token, history) {
+  const value = JSON.stringify(history);
+  if (utf8Length_(value) > CACHE_VALUE_MAX_BYTES) return;
+  CacheService.getScriptCache().put(HISTORY_KEY_PREFIX + token, value, HISTORY_TTL_S);
 }
 
 // =============================================================================

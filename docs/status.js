@@ -206,6 +206,7 @@
       lockAmount: '{amount}M CC',
       lockVerified: 'Verified {date}',
       verified: 'Verified',
+      confirmed: 'Confirmed',
       notVerified: 'Not verified yet',
       testing: 'Testing',
       lastUpdated: 'Last updated',
@@ -222,6 +223,51 @@
       dvpApproved: 'DVP request approved',
       lockVerified: 'Canton Coin lock verified',
       submitted: 'Application submitted'
+    },
+    // "History": every change from Monday's activity log (app.history), with
+    // the submission dates. Replaces "Activity" when the backend sends it.
+    history: {
+      heading: 'History',
+      moreOne: 'Show 1 earlier change',
+      more: 'Show {count} earlier changes',
+      // An FA Status change: the title for the new step; the detail is "Status: <pill label>".
+      status: {
+        received: 'Application received',
+        in_review: 'Moved to committee review',
+        in_review_locked: 'Canton Coin lock confirmed',
+        with_tokenomics: 'Approved by the Featured App Committee',
+        approved: 'Featured App status granted',
+        on_hold: 'Review paused',
+        not_approved: 'Not approved',
+        revoked: 'Featured status revoked',
+        withdrawn: 'Withdrawn',
+        closed_process: 'Closed: review process changed'
+      },
+      statusDetail: 'Status: {status}',
+      testing: {
+        not_started: 'Testing not started',
+        action_needed: 'We emailed you about testing access',
+        in_progress: 'Testing in progress',
+        complete: 'Testing complete'
+      },
+      lockVerified: 'Canton Coin lock verified',
+      lockAmount: 'Locked amount recorded',
+      email: 'The committee emailed you',
+      faType: 'Featured App type set',
+      dvpStatus: 'DVP status updated',
+      dvpRequest: 'DVP request updated',
+      // A DVP request's Status change, on the DVP page.
+      dvpState: {
+        in_review: 'In committee review',
+        with_tokenomics: 'Approved by the Featured App Committee',
+        approved: 'Approved by the Tokenomics Committee',
+        not_approved: 'Not approved',
+        closed: 'Closed'
+      },
+      submitted: 'Application submitted',
+      dvpSubmitted: 'DVP request submitted',
+      dvpReceived: 'Request received',
+      finalApproval: 'Final approval'
     },
     // The help box at the bottom of the side column.
     help: {
@@ -346,6 +392,7 @@
       // Timeline step details (the grey line under a title).
       details: {
         lockNotVerified: 'Not verified yet',
+        lockConfirmed: 'Confirmed',  // lock.confirmed, before a Lock Verified date is set
         lockAmount: '{amount}M CC locked',
         notStarted: 'Not started',
         inProgress: 'In progress',
@@ -499,6 +546,16 @@
   const DATE_FORMAT = new Intl.DateTimeFormat('en-GB', {
     day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC'
   });
+
+  // History times, in the visitor's own time zone: "17 Nov 2026" and "12:35".
+  const LOCAL_DAY_FORMAT = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const LOCAL_TIME_FORMAT = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+  // A history timestamp from the backend: "2026-11-17T12:35:07Z".
+  const HISTORY_AT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+  // History entries shown before "Show N earlier changes".
+  const HISTORY_VISIBLE = 6;
 
   // Locked Canton Coin in millions: 1.5 -> "1.5", 2 -> "2".
   const AMOUNT_FORMAT = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 6 });
@@ -1046,13 +1103,14 @@
 
     const granted = FA_GRANTED.indexOf(state) !== -1;
 
-    // Canton Coin lock: done once verified (date, plus the amount if known).
+    // Canton Coin lock: done once verified (date, plus the amount if known),
+    // or once the FA Status says the lock is in place (lock.confirmed).
     // Granted apps with no verification date simply don't show the step.
     const lock = isObject(app.lock) ? app.lock : {};
-    if (textOf(lock.verified) !== '') {
-      const amount = formatAmount(lock.amountMillions);
+    const amount = formatAmount(lock.amountMillions);
+    if (textOf(lock.verified) !== '' || lock.confirmed === true) {
       steps.push(step('lock', 'done', titles.lock, joinParts([
-        formatDate(lock.verified),
+        formatDate(lock.verified) || details.lockConfirmed,
         amount ? fillText(details.lockAmount, { amount: amount }) : ''
       ])));
     } else if (!granted) {
@@ -1431,7 +1489,7 @@
       columns([
         statusBox(words, faStatusExtra(app, state, words), app.updated),
         updateSection(app),
-        activitySection(faActivity(app, words))
+        historySection(app, words)
       ], [
         onFileSection(app),
         dvpListSection(code, apps, app),
@@ -1455,6 +1513,8 @@
       tiles.push({ label: t.locked, value: fillText(t.lockAmount, { amount: amount }), sub: verified ? fillText(t.lockVerified, { date: verified }) : '' });
     } else if (verified) {
       tiles.push({ label: t.locked, value: t.verified, sub: verified });
+    } else if (lock.confirmed === true) {
+      tiles.push({ label: t.locked, value: t.confirmed, sub: '' });
     } else if (!ended && !granted) {
       tiles.push({ label: t.locked, value: t.notVerified, sub: '' });
     }
@@ -1550,6 +1610,118 @@
         ])
       ]);
     })));
+  }
+
+  /**
+   * The application's history: every change the backend read from Monday's
+   * activity log (app.history), plus the submission dates. Falls back to
+   * "Activity" (dates only) when the backend sends no history.
+   */
+  function historySection(app, words) {
+    if (!Array.isArray(app.history)) return activitySection(faActivity(app, words));
+    const h = TEXT.history;
+    const requests = dvpOf(app);
+    const nameOf = function (id) {
+      for (let i = 0; i < requests.length; i += 1) {
+        if (idOf(requests[i]) === id) return textOf(requests[i].name) || TEXT.dvp.untitled;
+      }
+      return TEXT.dvp.untitled;
+    };
+    const events = [];
+    app.history.filter(isObject).forEach(function (e) {
+      const to = textOf(e.to);
+      let entry = null;
+      if (e.kind === 'status' && hasOwn(h.status, to)) {
+        const state = to === 'in_review_locked' ? 'in_review' : to;
+        const label = hasOwn(TEXT.fa.states, state) ? TEXT.fa.states[state].label : '';
+        entry = { title: h.status[to], detail: label ? fillText(h.statusDetail, { status: label }) : '' };
+      } else if (e.kind === 'testing' && hasOwn(h.testing, to)) {
+        entry = { title: h.testing[to], detail: '' };
+      } else if (e.kind === 'lock_verified') {
+        entry = { title: h.lockVerified, detail: formatDate(e.date) };
+      } else if (e.kind === 'lock_amount' && formatAmount(e.amount)) {
+        entry = { title: h.lockAmount, detail: fillText(TEXT.tiles.lockAmount, { amount: formatAmount(e.amount) }) };
+      } else if (e.kind === 'email' && hasOwn(TEXT.fa.update.kinds, to)) {
+        entry = { title: h.email, detail: TEXT.fa.update.kinds[to].title };
+      } else if (e.kind === 'fa_type' && textOf(e.text)) {
+        entry = { title: h.faType, detail: textOf(e.text) };
+      } else if (e.kind === 'dvp_status' && hasOwn(TEXT.fa.dvpStatus.states, to)) {
+        entry = { title: h.dvpStatus, detail: TEXT.fa.dvpStatus.states[to].label };
+      } else if (e.kind === 'dvp_state' && hasOwn(TEXT.dvp.states, to)) {
+        entry = { title: h.dvpRequest, detail: joinParts([nameOf(textOf(e.request)), TEXT.dvp.states[to].label]) };
+      }
+      const at = historyTime(e.at);
+      if (entry && at) events.push(Object.assign(entry, at));
+    });
+    // Dates that aren't in the activity log: the submission and each DVP request's.
+    const submitted = historyDay(app.submitted);
+    if (submitted) events.push(Object.assign({ title: h.submitted, detail: '' }, submitted));
+    requests.forEach(function (request) {
+      const day = historyDay(request.submitted);
+      if (day) events.push(Object.assign({ title: h.dvpSubmitted, detail: textOf(request.name) || TEXT.dvp.untitled }, day));
+    });
+    return events.length ? section('history', h.heading, historyList(events)) : null;
+  }
+
+  /** A DVP request's history (its Status changes, received, final approval); null without app.history. */
+  function dvpHistorySection(app, request) {
+    if (!Array.isArray(app.history)) return null;
+    const h = TEXT.history;
+    const id = idOf(request);
+    const events = [];
+    app.history.filter(isObject).forEach(function (e) {
+      const to = textOf(e.to);
+      if (e.kind !== 'dvp_state' || textOf(e.request) !== id || !hasOwn(h.dvpState, to)) return;
+      const at = historyTime(e.at);
+      if (at) events.push(Object.assign({ title: h.dvpState[to], detail: fillText(h.statusDetail, { status: TEXT.dvp.states[to].label }) }, at));
+    });
+    const received = historyDay(request.submitted);
+    if (received) events.push(Object.assign({ title: h.dvpReceived, detail: '' }, received));
+    const approved = historyDay(request.finalApproval);
+    if (approved) events.push(Object.assign({ title: h.finalApproval, detail: '' }, approved));
+    return events.length > 1 ? section('history', h.heading, historyList(events)) : null;
+  }
+
+  /** A logged change's time: { sort, iso, day, time } in the visitor's time zone, or null. */
+  function historyTime(value) {
+    const at = typeof value === 'string' ? value.trim() : '';
+    if (!HISTORY_AT_PATTERN.test(at)) return null;
+    const date = new Date(at);
+    if (isNaN(date.getTime())) return null;
+    return { sort: at, iso: at, day: LOCAL_DAY_FORMAT.format(date), time: LOCAL_TIME_FORMAT.format(date) };
+  }
+
+  /** A date-only entry (submission, final approval): { sort, iso, day, time: '' }, or null. */
+  function historyDay(value) {
+    const day = formatDate(value);
+    return day ? { sort: value.trim() + 'T00:00:00Z', iso: value.trim(), day: day, time: '' } : null;
+  }
+
+  /** History entries newest first; the first HISTORY_VISIBLE shown, the rest behind "Show N earlier changes". */
+  function historyList(events) {
+    events.sort(function (a, b) { return a.sort < b.sort ? 1 : a.sort > b.sort ? -1 : 0; });
+    const item = function (e) {
+      return el('li', null, [
+        el('span', { class: 'activity-when' }, [
+          el('time', { class: 'activity-date', datetime: e.iso, text: e.day }),
+          e.time ? el('span', { class: 'activity-time', text: e.time }) : null
+        ]),
+        el('span', { class: 'activity-dot', 'aria-hidden': 'true' }),
+        el('span', { class: 'activity-body' }, [
+          el('span', { class: 'activity-title', text: e.title }),
+          e.detail ? el('span', { class: 'activity-detail', text: e.detail }) : null
+        ])
+      ]);
+    };
+    const shown = events.slice(0, HISTORY_VISIBLE);
+    const rest = events.slice(HISTORY_VISIBLE);
+    return [
+      el('ol', { class: 'activity' }, shown.map(item)),
+      rest.length ? el('details', { class: 'history-more' }, [
+        el('summary', { text: rest.length === 1 ? TEXT.history.moreOne : fillText(TEXT.history.more, { count: String(rest.length) }) }),
+        el('ol', { class: 'activity' }, rest.map(item))
+      ]) : null
+    ];
   }
 
   /** "On file": Featured App type, issuer type, Party ID (with a copy button) and product site; null when all are missing. */
@@ -1683,6 +1855,7 @@
       tiles,
       columns([
         statusBox(words, words.contact ? contactLine() : null, request.updated),
+        dvpHistorySection(app, request),
         publicRecordSection(request.requestUrl)
       ], [
         appCard(app, appLink),

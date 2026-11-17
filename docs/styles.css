@@ -649,7 +649,35 @@ p, dl, dd { margin: 0; }
   padding: 12px 0;
   border-top: 1px solid var(--line);
 }
+.activity-when { display: grid; align-content: start; gap: 0; }
 .activity-date { font-size: 14px; color: var(--muted); white-space: nowrap; }
+.activity-time { font: 400 12px/1.4 var(--font-mono); color: var(--muted); }
+
+/* "Show N earlier changes" under the history. */
+.history-more summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 0;
+  color: var(--link);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  list-style: none;
+}
+.history-more summary::-webkit-details-marker { display: none; }
+.history-more summary::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin-top: -3px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+.history-more[open] summary::after { margin-top: 3px; transform: rotate(-135deg); }
+.history-more summary:hover { text-decoration: underline; text-underline-offset: 3px; }
 .activity-dot { width: 10px; height: 10px; margin-top: 7px; border: 2px solid var(--accent); border-radius: 50%; }
 .activity-body { display: grid; gap: 1px; min-width: 0; }
 .activity-title { font-weight: 500; }
@@ -936,6 +964,7 @@ a.app:hover .app-name { text-decoration: underline; text-underline-offset: 3px; 
   .p-label { display: none; }
   /* Activity: the date above the event. */
   .activity li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .activity-when { display: flex; gap: 8px; align-items: baseline; }
   .activity-dot { display: none; }
 }
 

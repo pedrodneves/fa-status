@@ -124,7 +124,7 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
       "type": "Non-Issuer",
       "submitted": "2026-10-14",
       "state": "with_tokenomics",
-      "lock": { "verified": "2026-10-18", "amountMillions": 1.5 },
+      "lock": { "verified": "2026-10-18", "amountMillions": 1.5, "confirmed": false },
       "testing": "complete",
       "partyId": "harborswap-1::1220…",
       "website": "https://harborswap.example",
@@ -135,6 +135,11 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
         { "id": "13454645978", "name": "Harbor Swap (RFQ)", "state": "in_review", "submitted": "2026-10-20",
           "finalApproval": null, "requestUrl": "https://lists.sync.global/g/accountability/message/147",
           "requestRef": "147", "updated": "2026-10-31" }
+      ],
+      "history": [
+        { "at": "2026-11-17T12:35:07Z", "kind": "status", "to": "in_review_locked", "from": "in_review" },
+        { "at": "2026-11-17T11:26:43Z", "kind": "email", "to": "fa_type_info" },
+        { "at": "2026-10-25T09:00:00Z", "kind": "dvp_state", "to": "with_tokenomics", "request": "13454645978" }
       ]
     }
   ]
@@ -145,6 +150,12 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
 - An unknown token gets `{"found": false}`. Any failure gets `{"error": "unavailable"}`, with no details.
 - Texts are capped and links are https-only (otherwise `null`).
 - `announcement` is sent only when the app is approved, and `finalApproval` only when the request is approved.
+- `lock.confirmed` is true when the FA Status is "0-Locked+Needs Review": the page then marks the lock step done, even without a Lock Verified date.
+- `history` (added 17 Nov 2026) lists the app's changes from Monday's activity log, newest first, at most 80:
+  - Kinds: `status` (`to`/`from`, the state keys, with `in_review_locked` for "0-Locked+Needs Review"), `testing` (`to`), `lock_verified` (`date`), `lock_amount` (`amount`), `email` (`to`, the email kind), `fa_type` (`text`, the label), `dvp_status` (`to`) and `dvp_state` (`to`, `request`: a DVP request of this app).
+  - Never sent: who made a change, item names, or any other column.
+  - Left out: cleared cells, labels that send nothing, and changes that don't change the key.
+  - Optional: when the activity log can't be read, `history` is absent and the page falls back to the dates it has.
 
 `POST <exec>` with body `{"email": "..."}` (`text/plain`) gets one of:
 - `{"ok": true}`
@@ -162,6 +173,15 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
 - `doGet(e)`, `doPost(e)`, `refresh()` (10-minute trigger), `setup()` (run once by hand).
 - `toApplicantView(row, dvpRows)` is the allow-list, built field by field.
 
+**History (per link, section 8b):**
+- `doGet` adds `history` to a found answer (`withHistory_`).
+- One `activity_logs(item_ids, column_ids, limit: 100, page)` query per board, at most 5 pages:
+  - `item_ids`: the link's own FA items and their DVP requests. Never an empty list, which would mean every item.
+  - `column_ids`: FA Status, Testing Process, Lock Verified, Locked amount, Send Email, FA Type and DVP Status on the FA board; Status on the DVP board.
+- Entries for any other item are dropped again on arrival, in case the API ignores `item_ids`.
+- Cached under `fa2:hist:<token>` for 10 minutes, so a change shows at most 10 minutes later, independently of the refresh trigger.
+- A failure is logged (error kind only) and not cached.
+
 **Cache (CacheService):**
 - 64 shards keyed by the token's first character (`fa2:<charCode>`). Each holds `{token: {apps}}`.
 - All 64 are written in one `putAll` on every run, `{}` when empty, so an address removed from Monday loses access on the next run.
@@ -170,7 +190,7 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
 - Largest shard on real data: about 8 KB of the 100 KB limit.
 
 **Monday client:**
-- Queries only: `items_page`/`next_items_page` (500 per page), plus `columns` in setup.
+- Queries only: `items_page`/`next_items_page` (500 per page), `activity_logs` for history, plus `columns` in setup.
 - Retries 429/5xx twice, honouring `Retry-After` up to 10 s.
 - A read is all or nothing: a failed run keeps the previous cache.
 
@@ -196,9 +216,9 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
 - `list`: count chips in the band; each card has the pill, a progress bar ("Step 5 of 6 · …"), the last update and the latest committee email.
 - `app`: the progress steps run across the band. Below them:
   - Number tiles: submitted ("34 days ago"), Canton Coin locked, testing, last updated.
-  - Main column: the status box with "What happens next" (`next` in the wording, per state), the latest committee email, and the activity history (dated events, newest first).
+  - Main column: the status box with "What happens next" (`next` in the wording, per state), the latest committee email, and the History card. It lists every change from `history` with its date and local time, plus the submission dates; the first 6 show, the rest sit behind "Show N earlier changes". Without `history` it falls back to the dated events it can derive.
   - Side column: On file (with "Copy Party ID"), DVP, and a help box.
-- `dvp`: the same layout, with tiles for submitted, final approval and last updated, a public-record card, and a card back to the application.
+- `dvp`: the same layout, with tiles for submitted, final approval and last updated, a History card (the request's own status changes), a public-record card, and a card back to the application.
 - The footer links (Featured App request, canton.foundation, the accountability list, the support address) are filled by `status.js` from its wording and `config.js`.
 
 **Look:**
@@ -216,6 +236,6 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
 
 ## Testing
 
-- `npm test`: 28 Node tests of `Code.gs`, with mocked Google services and a fake Monday. They cover tokens, address extraction, label maps, DVP matching, the cache, privacy (no address, sentinel or token anywhere), doGet/doPost, rate limits, setup, and that no mutation is ever sent.
-- `npm run test:page`: Playwright against the page with a mocked API, desktop and mobile (82 tests).
+- `npm test`: 33 Node tests of `Code.gs`, with mocked Google services and a fake Monday. They cover tokens, address extraction, label maps, DVP matching, the cache, privacy (no address, sentinel or token anywhere), doGet/doPost, rate limits, setup, and that no mutation is ever sent.
+- `npm run test:page`: Playwright against the page with a mocked API, desktop and mobile (86 tests).
 - `npm run live-check`: the real boards, read-only, with mocked email. Every address resolves to its rows, nothing leaks, and no write is sent. Last run on 16 Nov 2026: 11/11 passed.

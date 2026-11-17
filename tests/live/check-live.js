@@ -108,9 +108,33 @@ answers.split('\n').forEach((line) => {
   (body.apps || []).forEach((a) => { Object.keys(a).forEach((k) => keys.add('app.' + k)); (a.dvp || []).forEach((d) => Object.keys(d).forEach((k) => keys.add('dvp.' + k))); });
 });
 const allowed = ['app.id', 'app.name', 'app.institution', 'app.type', 'app.faType', 'app.dvpStatus', 'app.submitted', 'app.state', 'app.lock', 'app.testing', 'app.partyId',
-  'app.website', 'app.announcement', 'app.update', 'app.updated', 'app.dvp', 'dvp.id', 'dvp.name', 'dvp.state', 'dvp.submitted', 'dvp.finalApproval',
+  'app.website', 'app.announcement', 'app.update', 'app.updated', 'app.dvp', 'app.history', 'dvp.id', 'dvp.name', 'dvp.state', 'dvp.submitted', 'dvp.finalApproval',
   'dvp.requestUrl', 'dvp.requestRef', 'dvp.updated'];
 check('answers carry only allow-listed fields', Array.from(keys).every((k) => allowed.indexOf(k) !== -1), keys.size + ' distinct fields');
+
+// 3b. History from the activity log: only known kinds and fields, real timestamps.
+const HISTORY_FIELDS = { status: ['to', 'from'], testing: ['to'], lock_verified: ['date'], lock_amount: ['amount'], email: ['to'], fa_type: ['text'], dvp_status: ['to'], dvp_state: ['to', 'request'] };
+let events = 0;
+let withHistory = 0;
+let badEvents = 0;
+const kinds = {};
+answers.split('\n').forEach((line) => {
+  (JSON.parse(line).apps || []).forEach((a) => {
+    if (!Array.isArray(a.history)) return;
+    if (a.history.length) withHistory++;
+    a.history.forEach((e) => {
+      events++;
+      kinds[e.kind] = (kinds[e.kind] || 0) + 1;
+      const fields = HISTORY_FIELDS[e.kind];
+      const ok = fields && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(e.at) &&
+        Object.keys(e).every((k) => k === 'at' || k === 'kind' || fields.indexOf(k) !== -1) &&
+        (e.kind !== 'dvp_state' || (a.dvp || []).some((d) => d.id === e.request));
+      if (!ok) badEvents++;
+    });
+  });
+});
+check('history events carry only known kinds and fields, and DVP events belong to the app\'s own requests', badEvents === 0 && events > 0,
+  events + ' events on ' + withHistory + ' apps: ' + JSON.stringify(kinds));
 
 // 4. The email form, with MailApp mocked: a real address gets one (recorded) email whose link works; an unknown one gets nothing.
 const someone = Array.from(allAddresses)[0];

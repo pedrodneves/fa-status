@@ -7,6 +7,8 @@
  *   - boards(ids) { items_page(limit) { cursor items {...} } }   (first page)
  *   - next_items_page(cursor, limit) { cursor items {...} }      (next pages)
  *   - boards(ids) { columns(ids) { id type } }                   (setup check)
+ *   - boards(ids) { activity_logs(item_ids, column_ids, limit, page) { event created_at data } }
+ *     (history; entries come from data.logs, newest first)
  * Anything starting with "mutation" is counted and refused: the script must
  * never send one.
  *
@@ -91,8 +93,36 @@ function dvpItem(d) {
 }
 
 /**
+ * A raw activity log entry, shaped like Monday's (2026-10): created_at in
+ * 100-nanosecond units, data a JSON string. l = {board, item, column, at
+ * (ISO), value, previous, name}. user_id and pulse_name are included, as on
+ * the real API, so tests can check they never leave the script.
+ */
+function logEntry(l) {
+  return {
+    board: String(l.board || FA),
+    item: String(l.item),
+    column: l.column,
+    ms: Date.parse(l.at),
+    raw: {
+      event: l.event || 'update_column_value',
+      created_at: String(Date.parse(l.at) * 10000 + 1234),
+      user_id: 'SENTINEL-USER-7',
+      data: JSON.stringify({
+        board_id: Number(l.board || FA), pulse_id: Number(l.item), pulse_name: l.name || 'SENTINEL-PULSE-NAME',
+        column_id: l.column, column_type: 'color', column_title: 'SENTINEL-COLUMN-TITLE',
+        value: l.value === undefined ? null : l.value, previous_value: l.previous === undefined ? null : l.previous
+      })
+    }
+  };
+}
+
+/** A status label as the activity log writes it. */
+const label = (text) => (text ? { label: { index: 1, text: text, style: { color: '#fdab3d' }, is_done: false }, post_id: null } : null);
+
+/**
  * Creates a fake Monday server.
- * @param {{fa: Array, dvp?: Array, missingColumns?: Array<string>}} data
+ * @param {{fa: Array, dvp?: Array, logs?: Array, missingColumns?: Array<string>}} data
  */
 function createFakeMonday(data) {
   const boards = {};
@@ -100,6 +130,9 @@ function createFakeMonday(data) {
   boards[DVP] = { items: (data.dvp || []).slice() };
   const fake = {
     boards: boards,
+    logs: (data.logs || []).map(logEntry),
+    ignoreItemFilter: false,  // a broken API that returns every item's log
+    logRequests: [],          // {board, items, columns, page} of every activity_logs request
     missingColumns: new Set(data.missingColumns || []),
     requestedColumnIds: new Set(),
     queries: 0,
@@ -139,6 +172,20 @@ function handle(fake, req) {
     return ok({ data: { boards: [{ columns: columns }] } });
   }
 
+  if (query.indexOf('activity_logs') !== -1) {
+    const board = String((v.b || [])[0]);
+    fake.logRequests.push({ board: board, items: (v.i || []).slice(), columns: (v.c || []).slice(), page: v.p });
+    (v.c || []).forEach((id) => fake.requestedColumnIds.add(id));
+    const items = new Set((v.i || []).map(String));
+    const columns = new Set(v.c || []);
+    const all = fake.logs
+      .filter((l) => l.board === board && columns.has(l.column) && (fake.ignoreItemFilter || items.has(l.item)))
+      .sort((a, b) => b.ms - a.ms);
+    const limit = v.l || 25;
+    const start = ((v.p || 1) - 1) * limit;
+    return ok({ data: { boards: [{ activity_logs: all.slice(start, start + limit).map((l) => l.raw) }] } });
+  }
+
   (v.c || []).forEach((id) => fake.requestedColumnIds.add(id));
   const limit = v.l || 500;
   if (query.indexOf('next_items_page') !== -1) {
@@ -157,4 +204,4 @@ function page(fake, boardId, offset, limit, columnIds) {
   return { cursor: next, items: slice };
 }
 
-module.exports = { createFakeMonday, faItem, dvpItem, cv, FA, DVP, SENTINELS };
+module.exports = { createFakeMonday, faItem, dvpItem, cv, label, FA, DVP, SENTINELS };

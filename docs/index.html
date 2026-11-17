@@ -14,7 +14,7 @@
   <meta name="robots" content="noindex">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#FFFFFC" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#180231" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#030206" media="(prefers-color-scheme: dark)">
   <title>Featured App Status</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -28,9 +28,8 @@
 <body>
   <header class="p-top">
     <span class="p-brand">
-      <!-- The official logo: the light version on the white theme, the dark version on the dark theme. -->
-      <img class="p-logo p-logo-light" src="cf-logo-light.svg" width="108" height="30" alt="Canton Foundation">
-      <img class="p-logo p-logo-dark" src="cf-logo-dark.svg" width="108" height="30" alt="Canton Foundation">
+      <!-- The official logo, white-lettered version: the header is on the purple band in both themes. -->
+      <img class="p-logo" src="cf-logo-dark.svg" width="108" height="30" alt="Canton Foundation">
       <span class="p-divider" aria-hidden="true"></span>
       <span class="p-label">Featured App Status</span>
     </span>
@@ -49,13 +48,18 @@
   </header>
 
   <!-- status.js renders every screen in here; the HTML itself carries no data. -->
-  <main class="p-body p-narrow">
+  <main class="p-main">
     <noscript>
-      <div class="d-head">
-        <h1 class="p-h">Turn on JavaScript</h1>
-        <p class="p-sub">This page needs JavaScript to show your application's status. Turn it on in your browser, then reload the page.</p>
+      <div class="p-body p-narrow">
+        <div class="d-head">
+          <h1 class="p-h">Turn on JavaScript</h1>
+          <p class="p-sub">This page needs JavaScript to show your application's status. Turn it on in your browser, then reload the page.</p>
+        </div>
       </div>
     </noscript>
   </main>
+
+  <!-- status.js fills the footer: links from its wording and config.js. -->
+  <footer class="p-footer" data-footer></footer>
 </body>
 </html>

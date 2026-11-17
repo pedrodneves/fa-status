@@ -3,6 +3,8 @@
 
    Canton Foundation look (option A of the theme mockup): the colours of the
    canton.foundation website, IBM Plex Sans and Mono, the official logo.
+   Every screen opens with the purple band (header, title, progress); cards
+   sit on its lower edge, and a band-coloured footer closes the page.
 
    - Two themes from one set of tokens: white (default) and dark. The dark
      theme applies when the visitor's system asks for it, unless they picked
@@ -91,6 +93,20 @@
   --warn: #8A4B00;  --warn-soft: #FBEBD5;
   --bad: #A1261B;   --bad-soft: #FBE4E1;
   --idle: #5B5275;  --idle-soft: #EEEBF3;
+  --band: #180231;         /* the purple band: header, top of each screen, footer */
+  --shadow: 0 1px 2px rgba(24, 2, 49, .06), 0 10px 30px rgba(24, 2, 49, .08);
+
+  /* On the band (the same in both themes, only --band itself changes). */
+  --band-ink: #FFFFFC;
+  --band-muted: #CCCCDE;
+  --band-line: #3D2C66;
+  --band-accent: #F3FF97;  /* Canton yellow */
+  --band-link: #D5A5E3;    /* Canton lilac */
+  --band-field: #0D0329;
+  --band-field-line: #634BA9;
+  --band-bad: #F59A90;
+  --band-todo: #5B5275;
+  --band-stop: #C2BCD3;
 
   --font-body: "IBM Plex Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -126,6 +142,8 @@
     --warn: #F2B05E;  --warn-soft: #3A250F;
     --bad: #F59A90;   --bad-soft: #3D1622;
     --idle: #C2BCD3;  --idle-soft: #2A2140;
+    --band: #030206;       /* Canton black, so the band stands out from the purple page */
+    --shadow: none;
     color-scheme: dark;
   }
 }
@@ -153,23 +171,20 @@
   --warn: #F2B05E;  --warn-soft: #3A250F;
   --bad: #F59A90;   --bad-soft: #3D1622;
   --idle: #C2BCD3;  --idle-soft: #2A2140;
+  --band: #030206;
+  --shadow: none;
   color-scheme: dark;
 }
 
-/* ---- Theme-dependent pieces: logo version and toggle icon ---------------- */
-/* White theme: light logo, moon icon. Dark theme: dark logo, sun icon. */
-/* Two classes each, so these win over the plain .p-logo rule further down. */
-.p-logo.p-logo-dark,
+
+/* ---- Theme toggle icon ---------------------------------------------------- */
+/* White theme: moon icon. Dark theme: sun icon. */
 .theme-toggle .icon-sun { display: none; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .p-logo.p-logo-light,
   :root:not([data-theme="light"]) .theme-toggle .icon-moon { display: none; }
-  :root:not([data-theme="light"]) .p-logo.p-logo-dark,
   :root:not([data-theme="light"]) .theme-toggle .icon-sun { display: block; }
 }
-:root[data-theme="dark"] .p-logo.p-logo-light,
 :root[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
-:root[data-theme="dark"] .p-logo.p-logo-dark,
 :root[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
 
 /* ---- Base --------------------------------------------------------------- */
@@ -183,7 +198,10 @@ html {
   text-size-adjust: 100%;
 }
 
+/* A column, so the footer sits at the bottom of short screens. */
 body {
+  display: flex;
+  flex-direction: column;
   margin: 0;
   min-height: 100vh;
   background: var(--page);
@@ -207,6 +225,18 @@ p, dl, dd { margin: 0; }
 
 .mono { font-family: var(--font-mono); font-size: .86em; }
 
+/* Stroke icons built by status.js (icon()). */
+.icon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* Text for screen readers only (e.g. the state of each timeline step). */
 .visually-hidden {
   position: absolute !important;
@@ -221,19 +251,28 @@ p, dl, dd { margin: 0; }
   white-space: nowrap;
 }
 
-/* ---- Header bar --------------------------------------------------------- */
+/* The page column: 1160px wide at most, 16px gutters on phones, 24px wider up. */
+.wrap {
+  width: 100%;
+  max-width: 1160px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+/* ---- Header bar (on the band) ------------------------------------------- */
 .p-top {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px 12px;
-  padding: calc(10px + env(safe-area-inset-top, 0px))
+  padding: calc(12px + env(safe-area-inset-top, 0px))
            max(16px, env(safe-area-inset-right, 0px))
-           10px
+           12px
            max(16px, env(safe-area-inset-left, 0px));
-  background: var(--header);
-  border-bottom: 1px solid var(--line);
+  background: var(--band);
+  color: var(--band-ink);
 }
 
 .p-brand {
@@ -244,13 +283,13 @@ p, dl, dd { margin: 0; }
   font: 500 12px/1.2 var(--font-body);
   letter-spacing: .14em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--band-muted);
 }
 
-/* The official Canton Foundation logo (1182 x 329). */
+/* The official Canton Foundation logo (1182 x 329), white-lettered version. */
 .p-logo { display: block; height: 30px; width: auto; }
 
-.p-divider { flex: none; width: 1px; height: 22px; background: var(--line); }
+.p-divider { flex: none; width: 1px; height: 22px; background: var(--band-line); }
 .p-label { white-space: nowrap; }
 
 /* Brand mark used by 404.html, which has no logo. */
@@ -259,7 +298,7 @@ p, dl, dd { margin: 0; }
   width: 22px;
   height: 22px;
   border-radius: 6px;
-  background: var(--accent);
+  background: var(--band-accent);
 }
 
 .p-tools { display: inline-flex; align-items: center; gap: 12px; margin-left: auto; }
@@ -270,7 +309,7 @@ p, dl, dd { margin: 0; }
   align-items: center;
   gap: 7px;
   font-size: 14px;
-  color: var(--muted);
+  color: var(--band-muted);
 }
 .p-user svg {
   flex: none;
@@ -292,13 +331,14 @@ p, dl, dd { margin: 0; }
   width: 44px;
   height: 44px;
   padding: 0;
-  border: 1px solid var(--line);
+  border: 1px solid var(--band-line);
   border-radius: 10px;
   background: transparent;
-  color: var(--ink);
+  color: var(--band-ink);
   cursor: pointer;
 }
-.theme-toggle:hover { border-color: var(--accent); }
+.theme-toggle:hover { border-color: var(--band-accent); }
+.theme-toggle:focus-visible { outline-color: var(--band-accent); }
 .theme-toggle svg {
   width: 18px;
   height: 18px;
@@ -309,7 +349,10 @@ p, dl, dd { margin: 0; }
   stroke-linejoin: round;
 }
 
-/* ---- Main column -------------------------------------------------------- */
+/* ---- Main ----------------------------------------------------------------- */
+.p-main { flex: 1 0 auto; display: block; }
+
+/* Narrow centred column: loading, error, no-script and 404.html. */
 .p-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -322,15 +365,13 @@ p, dl, dd { margin: 0; }
            calc(36px + env(safe-area-inset-bottom, 0px))
            max(16px, env(safe-area-inset-left, 0px));
 }
-
-/* Narrow column for short screens: start page, loading, invalid link, errors. */
 .p-narrow { max-width: 472px; padding-top: 36px; }
 
 .p-h {
   font-size: 28px;
   font-weight: 400;
-  line-height: 1.2;
-  letter-spacing: -0.01em;
+  line-height: 1.12;
+  letter-spacing: -0.015em;
   overflow-wrap: anywhere;
 }
 /* Headings get focus from script after each render so screen readers start
@@ -338,8 +379,18 @@ p, dl, dd { margin: 0; }
 .p-h:focus { outline: none; }
 
 .p-sub { color: var(--muted); }
-.p-fine { font-size: 14px; color: var(--muted); }
-.p-foot { padding-top: 16px; border-top: 1px solid var(--line); }
+.p-fine { font-size: 15px; color: var(--muted); }
+
+/* Small uppercase labels: eyebrows above titles and card headings. */
+.eyebrow,
+.d-eyebrow,
+.hero-eyebrow,
+.card-h {
+  font: 500 12px/1.4 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: .16em;
+  color: var(--eyebrow);
+}
 
 /* Buttons (and links styled as buttons): the website's yellow pill. */
 .p-btn {
@@ -350,7 +401,7 @@ p, dl, dd { margin: 0; }
   justify-self: start;
   max-width: 100%;
   min-height: 48px;
-  padding: 10px 22px;
+  padding: 10px 24px;
   border: 1px solid var(--btn-line);
   border-radius: 999px;
   background: var(--btn-bg);
@@ -367,55 +418,74 @@ p, dl, dd { margin: 0; }
 .p-btn.secondary:hover { border-color: var(--accent); filter: none; }
 .p-btn:disabled { opacity: .65; cursor: progress; filter: none; }
 
-/* ---- Page heading block -------------------------------------------------- */
-.d-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
-
-/* Small uppercase labels: the eyebrow above a title and section headings. */
-.d-eyebrow,
-.p-section h2 {
-  font: 500 12px/1.4 var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: .16em;
-  color: var(--eyebrow);
+/* ---- The band at the top of each screen --------------------------------- */
+.hero { background: var(--band); color: var(--band-ink); }
+.hero-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  padding-top: 20px;
+  padding-bottom: 88px; /* room for the cards that overlap its lower edge */
 }
+.hero a { color: var(--band-link); }
+.hero :focus-visible { outline-color: var(--band-accent); }
+.hero .p-sub,
+.hero .p-fine,
+.hero .d-meta { color: var(--band-muted); }
+.hero .eyebrow,
+.hero .d-eyebrow,
+.hero .hero-eyebrow { color: var(--band-accent); }
+.hero .address { color: var(--band-ink); font-weight: 600; overflow-wrap: anywhere; }
+.hero .p-btn { border-color: var(--band-accent); }
+.hero .p-btn.secondary { background: transparent; color: var(--band-ink); border-color: var(--band-line); }
+.hero .p-btn.secondary:hover { border-color: var(--band-accent); }
+
+.d-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .d-meta { font-size: 15px; color: var(--muted); }
+.p-sub { max-width: 620px; }
+.hero .p-sub { font-size: 17px; }
+.hero .p-h { font-size: 34px; letter-spacing: -0.02em; }
+
 /* Shrink-wrapped items size to their longest word, so let long names break. */
-.back { justify-self: start; max-width: 100%; overflow-wrap: anywhere; }
+.back { justify-self: start; max-width: 100%; overflow-wrap: anywhere; font-size: 15px; }
 
-/* ---- Status box ---------------------------------------------------------- */
-.status-box {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
-  padding: 18px 20px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface-2);
+/* Title on the left, status pill and progress on the right (stacked on phones). */
+.hero-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 32px;
 }
-.status-box > .pill,
-.status-box > .status-action { justify-self: start; max-width: 100%; }
-.status-box > .status-action { overflow-wrap: anywhere; }
-.status-box .when { font-size: 13px; color: var(--muted); }
+.hero-title > .d-head { flex: 1 1 420px; min-width: 0; }
+.hero-status { display: grid; justify-items: start; align-content: start; gap: 8px; }
+.hero-progress { font-size: 14px; color: var(--band-muted); }
 
-/* ---- Latest email from the committee ------------------------------------ */
-.p-update {
+/* Cards that sit on the lower edge of the band. */
+.overlap { position: relative; margin-top: -56px; }
+
+/* ---- Cards ------------------------------------------------------------- */
+.card {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 6px;
-  padding: 16px 20px;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 20px 22px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 16px;
   background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow);
 }
-.p-update .update-title { font-weight: 600; }
-.p-update .status-action { justify-self: start; max-width: 100%; overflow-wrap: anywhere; }
-.p-update .when { font-size: 13px; color: var(--muted); }
 
 /* ---- Pills --------------------------------------------------------------- */
 .pill {
   display: inline-flex;
   align-items: center;
+  justify-self: start;
   gap: 8px;
+  max-width: 100%;
   padding: 4px 12px;
   border: 1px solid transparent; /* becomes visible in forced-colours mode */
   border-radius: 999px;
@@ -437,109 +507,224 @@ p, dl, dd { margin: 0; }
 .pill.warn { color: var(--warn); background: var(--warn-soft); }
 .pill.bad  { color: var(--bad);  background: var(--bad-soft); }
 .pill.idle { color: var(--idle); background: var(--idle-soft); }
+.pill.big  { padding: 8px 16px; font-size: 13px; white-space: normal; }
 
-/* ---- Timeline (ol.tl) ---------------------------------------------------- */
-.tl { list-style: none; margin: 0; padding: 0; display: grid; }
+/* Pills on the band use the dark-theme colours in both themes. */
+.hero-status .pill.info, .tl .pill.info { color: #D5A5E3; background: #2E1A4A; }
+.hero-status .pill.ok,   .tl .pill.ok   { color: #030206; background: #F3FF97; }
+.hero-status .pill.warn, .tl .pill.warn { color: #F2B05E; background: #3A250F; }
+.hero-status .pill.bad,  .tl .pill.bad  { color: #F59A90; background: #3D1622; }
+.hero-status .pill.idle, .tl .pill.idle { color: #C2BCD3; background: #2A2140; }
+
+/* ---- Progress steps (ol.tl, in the band) --------------------------------- */
+/* Phones: a vertical list. From 721px: one row, a connector between steps. */
+.tl { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 16px; }
 .tl li {
   position: relative;
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr);
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-content: start;
   gap: 14px;
-  padding-bottom: 18px;
 }
-.tl li:last-child { padding-bottom: 0; }
-
-/* Connector line from each step down to the next one. */
 .tl li::before {
   content: "";
   position: absolute;
-  left: 12px;
-  top: 22px;
-  bottom: -2px;
+  left: 13px;
+  top: 30px;
+  bottom: -14px;
   width: 2px;
-  background: var(--line);
+  border-radius: 2px;
+  background: var(--band-line);
 }
 .tl li:last-child::before { display: none; }
-.tl li.done::before { background: var(--done); }
+.tl li.done::before { background: var(--band-accent); }
 
-/* Step dot: done = filled with a tick, current = accent ring with a dot,
+/* Step dot: done = yellow with a tick, current = yellow ring with a dot,
    todo = empty ring, stop = grey with a bar. */
 .tl .dot {
   position: relative;
   z-index: 1;
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
-  border: 2px solid var(--todo);
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--band-todo);
   border-radius: 50%;
-  background: var(--page);
 }
-.tl .done .dot { border-color: var(--done); background: var(--done); }
+.tl .done .dot { border-color: var(--band-accent); background: var(--band-accent); }
 .tl .done .dot::after {
   content: "";
-  width: 8px;
-  height: 4px;
-  border-left: 2px solid var(--done-ink);
-  border-bottom: 2px solid var(--done-ink);
+  width: 9px;
+  height: 5px;
+  border-left: 2px solid #030206;
+  border-bottom: 2px solid #030206;
   transform: rotate(-45deg) translate(1px, -1px);
 }
-.tl .current .dot { border-color: var(--accent); }
+.tl .current .dot { border-color: var(--band-accent); box-shadow: 0 0 0 5px rgba(243, 255, 151, .14); }
 .tl .current .dot::after {
   content: "";
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--band-accent);
 }
-.tl .stop .dot { border-color: var(--idle); background: var(--idle); }
-.tl .stop .dot::after { content: ""; width: 10px; height: 2px; background: var(--page); }
+.tl .stop .dot { border-color: var(--band-stop); background: var(--band-stop); }
+.tl .stop .dot::after { content: ""; width: 10px; height: 2px; background: #030206; }
 
-.tl .t { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; padding-top: 2px; }
-.tl-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
-.tl-title { font-weight: 500; }
-.tl-detail { font-size: 14px; color: var(--muted); }
-.tl .todo .tl-title { color: var(--muted); font-weight: 400; }
-.tl .current .tl-title { color: var(--accent); }
+.tl .t { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 2px; padding-top: 3px; }
+.tl-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.tl-title { font-weight: 500; line-height: 1.3; color: var(--band-ink); }
+.tl-detail { font-size: 13px; color: var(--band-muted); }
+.tl .todo .tl-title { color: var(--band-muted); font-weight: 400; }
+.tl .current .tl-title { color: var(--band-accent); font-weight: 600; }
 .tl .pill { gap: 6px; padding: 1px 8px; font-size: 11px; }
 
-/* ---- Sections below the timeline ---------------------------------------- */
-.p-section {
+/* ---- Progress bar (list cards, DVP cards, the example card) -------------- */
+.progress { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
+.seg { height: 8px; border-radius: 999px; background: var(--line); }
+.seg.done { background: var(--accent); }
+.seg.current { background: var(--accent); opacity: .4; }
+.seg.stop { background: var(--idle-soft); border: 1px solid var(--line); }
+
+/* ---- Number tiles --------------------------------------------------------- */
+.tiles {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
-  padding-top: 18px;
+}
+.tile { gap: 2px; padding: 16px 18px; }
+.tile-label { font-size: 13px; color: var(--muted); }
+.tile-value { font-size: 22px; line-height: 1.3; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.tile-sub { font-size: 13px; color: var(--muted); }
+
+/* ---- Main and side columns ------------------------------------------------ */
+.cols {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 20px;
+  padding-top: 20px;
+  padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px));
+}
+.cols.overlap { padding-top: 0; }
+.col-main { flex: 999 1 520px; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+.col-side { flex: 1 1 300px; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+
+/* ---- Status box ------------------------------------------------------------ */
+.status-message { font-size: 19px; line-height: 1.45; }
+.status-box > .status-action { justify-self: start; max-width: 100%; overflow-wrap: anywhere; }
+.next {
+  display: flex;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.next .icon { margin-top: 2px; color: var(--accent); }
+.next-h { font-weight: 600; }
+.next-text { color: var(--muted); }
+.when { font-size: 13px; color: var(--muted); }
+
+/* ---- Cards with an icon: latest committee email, public record ------------ */
+.p-update { grid-template-columns: 40px minmax(0, 1fr); gap: 16px; }
+.card-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--info-soft);
+  color: var(--info);
+}
+.update-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
+.update-title { font-size: 18px; font-weight: 500; }
+.update-body .status-action { justify-self: start; max-width: 100%; overflow-wrap: anywhere; }
+
+/* ---- Activity --------------------------------------------------------------- */
+.activity { list-style: none; margin: 0; padding: 0; display: grid; }
+.activity li {
+  display: grid;
+  grid-template-columns: 104px 10px minmax(0, 1fr);
+  gap: 14px;
+  padding: 12px 0;
   border-top: 1px solid var(--line);
 }
+.activity-date { font-size: 14px; color: var(--muted); white-space: nowrap; }
+.activity-dot { width: 10px; height: 10px; margin-top: 7px; border: 2px solid var(--accent); border-radius: 50%; }
+.activity-body { display: grid; gap: 1px; min-width: 0; }
+.activity-title { font-weight: 500; }
+.activity-detail { font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
 
-/* "On file" key/value list. */
-.kv {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 8px 18px;
-  font-size: 15px;
-}
-.kv dt { color: var(--muted); }
+/* ---- On file ------------------------------------------------------------------ */
+.kv { display: grid; gap: 14px; font-size: 15px; }
+.kv-row { display: grid; gap: 2px; min-width: 0; }
+.kv dt { font-size: 13px; color: var(--muted); }
 .kv dd { min-width: 0; overflow-wrap: anywhere; }
-
-/* "DVP status" line at the top of the DVP section. */
-.dvp-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
-.dvp-status-label { font-size: 15px; color: var(--muted); }
+.party { display: grid; justify-items: start; gap: 8px; }
+.party-id {
+  justify-self: stretch;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.copy {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 4px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  font: 500 13px/1 var(--font-body);
+  cursor: pointer;
+}
+.copy:hover { border-color: var(--accent); }
+.copy .icon { width: 14px; height: 14px; }
 
 /* URLs shown as link text (product site, mailing-list post). */
 .url-text { overflow-wrap: anywhere; }
 
-/* "Public record" line on a DVP page. */
-.record { color: var(--ink); }
+/* ---- DVP status line ----------------------------------------------------------- */
+.dvp-status { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 10px; }
+.dvp-status-label { font-size: 14px; color: var(--muted); }
 
-/* ---- Cards: applications on the list, DVP requests on an application ---- */
-.app-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+/* ---- Help box ---------------------------------------------------------------- */
+.help { background: var(--surface-2); box-shadow: none; }
+.help-h { font-size: 16px; font-weight: 600; }
+.help-btn {
+  min-height: 44px;
+  padding: 8px 18px;
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+  overflow-wrap: anywhere;
+}
+.privacy,
+.privacy-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.privacy { padding-top: 12px; border-top: 1px solid var(--line); }
+.privacy .icon,
+.privacy-note .icon { width: 16px; height: 16px; margin-top: 2px; color: var(--accent); }
+.privacy-note { padding: 16px 18px; border: 1px dashed var(--line); border-radius: 14px; font-size: 14px; }
+
+/* ---- Application and DVP cards (a.app) ----------------------------------- */
+.app-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
 .app {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  align-items: center;
-  gap: 6px 16px;
-  padding: 14px 16px;
+  align-content: start;
+  gap: 8px;
+  padding: 16px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
@@ -547,35 +732,181 @@ p, dl, dd { margin: 0; }
   text-decoration: none;
 }
 a.app:hover { border-color: var(--accent); }
-a.app:hover .app-name { text-decoration: underline; text-underline-offset: 2px; }
-.app-name { font: 500 17px/1.3 var(--font-body); overflow-wrap: anywhere; }
-.app-meta { font-size: 14px; color: var(--muted); }
+a.app:hover .app-name { text-decoration: underline; text-underline-offset: 3px; }
+.app-name { font: 500 16px/1.3 var(--font-body); overflow-wrap: anywhere; }
+.app-meta { font-size: 13px; color: var(--muted); }
 .app .pill { justify-self: start; }
+.col-side .pill { white-space: normal; }
+.app .seg { height: 6px; }
 
-/* ---- Email form (start page and invalid link) ----------------------------- */
-.email-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+/* The list: bigger cards on the band's edge, with a progress bar. */
+.list-body { display: grid; gap: 20px; padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px)); }
+.app-lg { gap: 14px; padding: 20px 22px; border-radius: 16px; box-shadow: var(--shadow); }
+.app-lg .app-name { font-size: 20px; }
+.app-lg .seg { height: 8px; }
+.app-top { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; }
+.app-progress { display: grid; gap: 8px; }
+.app-progress-text { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; font-size: 14px; color: var(--muted); }
+.app-step { color: var(--ink); font-weight: 500; }
+.app-email {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-size: 14px;
+}
+.app-email .icon { width: 16px; height: 16px; margin-top: 2px; color: var(--accent); }
+
+/* Count chips in the list's band. */
+.chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  padding: 6px 14px;
+  border: 1px solid var(--band-line);
+  border-radius: 999px;
+  font-size: 14px;
+  color: var(--band-muted);
+}
+
+/* ---- Start, sent and invalid screens ---------------------------------------- */
+.hero-start-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 40px 56px;
+  padding-top: 40px;
+  padding-bottom: 104px;
+}
+.hero-main { flex: 1 1 440px; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+.hero-start .p-h { font-size: 36px; line-height: 1.08; letter-spacing: -0.02em; }
+
+/* Email form, on the band. */
+.email-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; max-width: 560px; }
 .field-label { font-size: 15px; font-weight: 500; }
 .field-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .field {
   width: 100%;
   min-width: 0;
   height: 48px;
-  padding: 0 14px;
-  border: 1px solid var(--field-line);
-  border-radius: 10px;
-  background: var(--field-bg);
-  color: var(--ink);
+  padding: 0 18px;
+  border: 1px solid var(--band-field-line);
+  border-radius: 999px;
+  background: var(--band-field);
+  color: var(--band-ink);
   font: 400 16px/1.3 var(--font-body); /* 16px or more: iOS doesn't zoom in on focus */
 }
-.field::placeholder { color: var(--muted); opacity: 1; }
-.field:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
-.field[aria-invalid="true"] { border-color: var(--bad); }
+.field::placeholder { color: #B9B3CC; opacity: 1; }
+.field:focus-visible { outline: 2px solid var(--band-accent); outline-offset: 2px; }
+.field[aria-invalid="true"] { border-color: var(--band-bad); }
 .email-form .p-btn { justify-self: stretch; } /* full width on phones */
-.form-message { font-size: 14px; color: var(--bad); }
+.form-message { font-size: 14px; color: var(--band-bad); }
 .form-message:empty { display: none; }
 
-/* The address on the "check your email" screen. */
-.address { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+/* The sample status card next to the form (hidden on phones). */
+.example {
+  display: none;
+  flex: 1 1 360px;
+  max-width: 440px;
+  margin: 0 auto;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .35);
+}
+.example .eyebrow { color: var(--eyebrow); }
+.example-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.example-tag {
+  padding: 2px 8px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  font: 500 11px/1.4 var(--font-mono);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.example-name { font-size: 24px; line-height: 1.2; }
+.example-meta,
+.example-step { font-size: 14px; color: var(--muted); }
+.example-step strong { color: var(--ink); font-weight: 500; }
+.example-email { display: flex; gap: 12px; padding: 14px; border-radius: 12px; background: var(--surface-2); }
+.example-email .icon { width: 18px; height: 18px; margin-top: 3px; color: var(--accent); }
+.example-email-label { font-size: 12px; color: var(--muted); }
+.example-email-title { font-weight: 500; }
+
+/* Three promises on the band's edge. */
+.promises { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.promise { gap: 8px; }
+.promise .icon { width: 22px; height: 22px; color: var(--accent); }
+.promise-title { font-weight: 600; }
+
+/* Sections below: how review works, statuses, FAQ. */
+.info-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; padding-top: 64px; }
+.info-head { display: grid; gap: 10px; max-width: 640px; }
+.info-h { font-size: 28px; font-weight: 400; line-height: 1.2; letter-spacing: -0.01em; }
+
+.how-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.how-step { gap: 6px; box-shadow: none; }
+.how-n { font: 500 13px/1 var(--font-mono); letter-spacing: .08em; color: var(--accent); }
+.how-title { font-size: 18px; font-weight: 500; line-height: 1.3; }
+
+.glossary { list-style: none; margin: 0; padding: 4px 22px; gap: 0 40px; box-shadow: none; }
+.glossary li { display: grid; justify-items: start; align-content: start; gap: 8px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.glossary li:last-child { border-bottom: 0; }
+
+.faq { padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
+.faq-list { border-top: 1px solid var(--line); }
+.faq-list details { border-bottom: 1px solid var(--line); }
+.faq-list summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 56px;
+  padding: 14px 0;
+  list-style: none;
+  cursor: pointer;
+}
+.faq-list summary::-webkit-details-marker { display: none; }
+.faq-list summary::after {
+  content: "";
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin: -4px 4px 0 0;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg);
+}
+.faq-list details[open] summary::after { margin-top: 4px; transform: rotate(-135deg); }
+.faq-q { font-size: 17px; font-weight: 500; }
+.faq-list summary:hover .faq-q { text-decoration: underline; text-underline-offset: 3px; }
+.faq-a { max-width: 680px; padding-bottom: 18px; color: var(--muted); }
+
+/* ---- Footer (on the band) ---------------------------------------------------- */
+.p-footer { background: var(--band); color: var(--band-muted); }
+.p-footer a { color: var(--band-link); }
+.p-footer :focus-visible { outline-color: var(--band-accent); }
+.foot-inner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 32px;
+  padding-top: 40px;
+  padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+}
+.foot-about { display: grid; gap: 12px; max-width: 360px; font-size: 14px; }
+.foot-logo { display: block; height: 28px; width: auto; }
+.foot-links { display: flex; flex-wrap: wrap; gap: 24px 48px; }
+.foot-group { display: grid; align-content: start; gap: 8px; font-size: 14px; }
+.foot-h {
+  font: 500 11px/1.4 var(--font-mono);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--band-accent);
+}
 
 /* ---- Loading ------------------------------------------------------------- */
 .loading {
@@ -598,17 +929,26 @@ a.app:hover .app-name { text-decoration: underline; text-underline-offset: 2px; 
   @keyframes fa-spin { to { transform: rotate(360deg); } }
 }
 
-/* ---- Narrow phones: keep the header on one line ------------------------- */
+/* ---- Narrow phones ------------------------------------------------------- */
 @media (max-width: 480px) {
+  /* Keep the header on one line. */
   .p-divider,
   .p-label { display: none; }
+  /* Activity: the date above the event. */
+  .activity li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .activity-dot { display: none; }
 }
 
 /* ---- Wider screens -------------------------------------------------------- */
 @media (min-width: 561px) {
+  /* The header lines up with the 1160px page column. */
   .p-top {
-    padding-top: calc(12px + env(safe-area-inset-top, 0px));
-    padding-bottom: 12px;
+    padding-top: calc(14px + env(safe-area-inset-top, 0px));
+    padding-bottom: 14px;
+    padding-left: max(24px, calc((100% - 1112px) / 2));
+    padding-right: max(24px, calc((100% - 1112px) / 2));
+  }
+  .wrap {
     padding-left: max(24px, env(safe-area-inset-left, 0px));
     padding-right: max(24px, env(safe-area-inset-right, 0px));
   }
@@ -620,13 +960,33 @@ a.app:hover .app-name { text-decoration: underline; text-underline-offset: 2px; 
   }
   .p-narrow { padding-top: 64px; }
   .p-h { font-size: 34px; }
+  .hero .p-h { font-size: 44px; }
+  .hero-start .p-h { font-size: 52px; }
+  .info-h { font-size: 34px; }
 
   /* Email form: field and button on one line. */
   .field-row { grid-template-columns: minmax(0, 1fr) auto; }
   .email-form .p-btn { justify-self: start; }
 
-  /* Cards: name and details on the left, the pill on the right. */
-  .app { grid-template-columns: minmax(0, 1fr) auto; }
-  .app-meta { grid-column: 1; }
-  .app .pill { grid-row: 1 / span 2; grid-column: 2; justify-self: end; }
+  .promises,
+  .how-steps,
+  .glossary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .glossary li:nth-last-child(2):nth-child(odd) { border-bottom: 0; }
+}
+
+@media (min-width: 721px) {
+  /* Progress steps in one row, joined by connectors. */
+  .tl { grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 0; }
+  .tl li { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; gap: 12px; padding-right: 16px; }
+  .tl li::before { left: 40px; right: 12px; top: 13px; bottom: auto; width: auto; height: 2px; }
+  .tl .t { padding-top: 0; }
+
+  .example { display: grid; gap: 16px; }
+}
+
+@media (min-width: 901px) {
+  .promises,
+  .how-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .hero-inner { padding-top: 24px; }
+  .hero-start-inner { padding-top: 56px; padding-bottom: 112px; }
 }

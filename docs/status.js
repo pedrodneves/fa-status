@@ -81,6 +81,7 @@
 
     // ---- Start page and the email form --------------------------------------
     start: {
+      eyebrow: 'For Featured App applicants',
       heading: 'Check your application status',
       body: "Enter the email address on your Featured App application. We'll email you a private link to the status of your applications and DVP requests.",
       label: 'Email address',
@@ -96,6 +97,72 @@
       body: "If {address} is on a Featured App application, we've sent it a link. It can take a few minutes, so check your spam folder too.",
       noEmail: "Nothing after 15 minutes? That address may not be on an application: try another one you applied with, or contact the Featured App team at {email}.",
       again: 'Use a different email'
+    },
+
+    // ---- Below the form on the start, sent and invalid screens -------------
+    about: {
+      // The sample card next to the form (hidden from screen readers: it's decoration).
+      example: {
+        tag: 'Example',
+        eyebrow: 'Featured App application',
+        name: 'Your app',
+        meta: 'Your institution',
+        pill: 'In committee review',
+        step: 'Step 4 of 6',
+        stepName: 'Featured App Committee review',
+        email: 'Latest email from the committee',
+        emailTitle: 'Office hours invitation'
+      },
+      promisesLabel: 'About your status page',
+      promises: [
+        { icon: 'lock', title: 'Private to your email', text: 'Your link shows only the applications that list your address. No one else can find them.' },
+        { icon: 'refresh', title: 'Updated every 10 minutes', text: "The page reads the committee's own records, so changes show up soon after they're made." },
+        { icon: 'layers', title: 'Applications and DVP requests', text: 'Every application on your address, with the DVP / asset-moving requests that belong to it.' }
+      ],
+      // Step titles come from fa.steps, so they always match the timeline.
+      how: {
+        eyebrow: 'How review works',
+        heading: 'Six steps from application to Featured App status',
+        intro: "Your status page shows which of these steps are done and which one you're on.",
+        steps: [
+          { key: 'received', text: 'Your submission is logged with the date it arrived.' },
+          { key: 'lock', text: 'We confirm your Canton Coin lock and record the amount locked.' },
+          { key: 'testing', text: 'We test your app. If we need access from you, we email you.' },
+          { key: 'committee', text: 'The committee reviews your application and may invite you to its office hours.' },
+          { key: 'tokenomics', text: 'Once the Featured App Committee approves, the Tokenomics Committee does the final review.' },
+          { key: 'granted', text: 'Approval is announced on the tokenomics mailing list.' }
+        ]
+      },
+      // Labels and explanations come from fa.states.
+      statuses: {
+        eyebrow: 'Statuses',
+        heading: 'What each status means'
+      },
+      faq: {
+        eyebrow: 'FAQ',
+        heading: 'Questions applicants ask',
+        intro: 'Something else? Contact the Featured App team at {email}.',
+        items: [
+          { q: "I didn't get an email", a: 'Links can take a few minutes, so check your spam folder. We only email addresses that are on an application, as its main email or as a responsible person. Nothing after 15 minutes? Try another address you applied with, or contact the Featured App team at {email}.' },
+          { q: 'Who can see my status?', a: 'Anyone who has your link. Each address on an application gets its own link, which shows only the applications that list that address. Share it only within your team.' },
+          { q: 'How current is the page?', a: "It refreshes from the committee's records every 10 minutes. Each application shows the date its record last changed." },
+          { q: 'I lost my link. Can I get it again?', a: "Yes. Enter your email address above and we'll send the same link again. You can ask once every 15 minutes, up to three times in six hours." },
+          { q: "My DVP request isn't showing", a: 'DVP requests are matched to applications by name. If your request uses a different name from your application, contact the Featured App team at {email} so they can link them.' },
+          { q: 'Can I change my application here?', a: 'No, this page is read-only. To update anything on file, contact the Featured App team at {email}.' }
+        ]
+      }
+    },
+
+    // ---- Footer (every screen) -----------------------------------------------
+    // `url: 'reapply'` means config.reapplyUrl; `email: true` is the support address.
+    siteFooter: {
+      label: 'Useful links',
+      about: "Featured App Status shows applicants where their applications stand. It's read-only: to change anything, contact the Featured App team.",
+      groups: [
+        { heading: 'Apply', links: [{ text: 'Featured App request ↗', url: 'reapply' }, { text: 'canton.foundation ↗', url: 'https://canton.foundation/' }] },
+        { heading: 'Public record', links: [{ text: 'Accountability mailing list ↗', url: 'https://lists.sync.global/g/accountability' }] },
+        { heading: 'Contact', links: [{ email: true }] }
+      ]
     },
 
     // ---- Screens without application data ----------------------------------
@@ -115,7 +182,55 @@
     lastUpdated: 'Last updated {date}',
     contact: 'Questions? Contact the Featured App team at {email}.',
     footer: 'This page is private to your email address. Anyone with the link can see these applications, so share it only within your team. Questions? Contact the Featured App team at {email}.',
-    statusLabel: 'Status',  // accessible name of the status box
+    statusHeading: 'Where things stand',  // heading of the status box
+    nextHeading: 'What happens next',      // the box under the status message (states with `next`)
+    // Under the steps in the purple band, and on each card of the list.
+    progress: {
+      step: 'Step {n} of {total}',
+      allDone: 'All steps complete'
+    },
+    // "34 days ago" on the number tiles. Future dates show the date instead.
+    ago: {
+      today: 'Today',
+      yesterday: 'Yesterday',
+      days: '{n} days ago',
+      month: '1 month ago',
+      months: '{n} months ago',
+      year: '1 year ago',
+      years: '{n} years ago'
+    },
+    // The number tiles under the band.
+    tiles: {
+      submitted: 'Submitted',
+      locked: 'Canton Coin locked',
+      lockAmount: '{amount}M CC',
+      lockVerified: 'Verified {date}',
+      verified: 'Verified',
+      notVerified: 'Not verified yet',
+      testing: 'Testing',
+      lastUpdated: 'Last updated',
+      finalApproval: 'Final approval',
+      notYet: 'Not yet'
+    },
+    // "Activity" on the application page: dated events, newest first.
+    activity: {
+      heading: 'Activity',
+      emailed: 'The committee emailed you',
+      recordUpdated: 'Record last updated',
+      status: 'Status: {status}',
+      dvpSubmitted: 'DVP request submitted',
+      dvpApproved: 'DVP request approved',
+      lockVerified: 'Canton Coin lock verified',
+      submitted: 'Application submitted'
+    },
+    // The help box at the bottom of the side column.
+    help: {
+      app: 'Questions about this application?',
+      dvp: 'Questions about this request?',
+      text: 'The Featured App team can help with anything on this page.',
+      button: 'Email {email}',
+      privateNote: 'This page is private to your email address. Anyone with the link can see it, so share it only within your team.'
+    },
     // Read by screen readers before each timeline step (the dots are visual only).
     stepState: {
       done: 'Completed',
@@ -126,10 +241,20 @@
 
     // ---- List of applications (when an address has more than one) ----------
     list: {
+      eyebrow: 'Your status page',
       heading: 'Your applications',
       intro: 'Featured App applications that list your email address. Select one to see its progress and DVP requests.',
       dvpOne: '1 DVP request',
       dvpMany: '{count} DVP requests',
+      // The count chips in the band; a chip with a count of 0 isn't shown.
+      chips: {
+        appsOne: '1 application',
+        appsMany: '{count} applications',
+        active: '{count} in progress',
+        approved: '{count} approved',
+        ended: '{count} ended'
+      },
+      email: 'Latest email from the committee: {title}',
       back: '← All your applications'
     },
 
@@ -140,7 +265,10 @@
       progressLabel: 'Application progress',
       onFile: 'On file',
       faType: 'Featured App type',
+      issuerType: 'Issuer type',
       partyId: 'Party ID',
+      copy: 'Copy Party ID',
+      copied: 'Copied',
       productSite: 'Product site',
       dvpHeading: 'DVP',
 
@@ -156,28 +284,34 @@
       },
 
       // FA states (the backend maps the FA Status column to these keys).
-      // Any other value is shown as in_review.
+      // Any other value is shown as in_review. `next` fills the "What
+      // happens next" box; states without it don't show the box.
       states: {
         received: {
           label: 'Received', tone: 'info',
-          message: 'Your application has been received and is waiting for committee review.'
+          message: 'Your application has been received and is waiting for committee review.',
+          next: 'Next, the Featured App Committee reviews your application. This page updates when review starts.'
         },
         in_review: {
           label: 'In committee review', tone: 'info',
-          message: 'The Featured App Committee is reviewing your application.'
+          message: 'The Featured App Committee is reviewing your application.',
+          next: 'If the committee approves, your application goes to the Tokenomics Committee for the final review.'
         },
         with_tokenomics: {
           label: 'With Tokenomics Committee', tone: 'info',
-          message: 'The Featured App Committee approved your application. The Tokenomics Committee is doing the final review.'
+          message: 'The Featured App Committee approved your application. The Tokenomics Committee is doing the final review.',
+          next: 'If the Tokenomics Committee approves, your app gets Featured App status, and the approval is announced on the tokenomics mailing list.'
         },
         approved: {
           label: 'Approved', tone: 'ok',
           message: 'Your app has Featured App status.',
-          linkText: 'View the public announcement ↗'  // to app.announcement (https only)
+          linkText: 'View the public announcement ↗',  // to app.announcement (https only)
+          next: 'Nothing more is needed for this application.'
         },
         on_hold: {
           label: 'On hold', tone: 'warn',
-          message: 'Review is paused while CIP-0116 is resolved. This page will update when review resumes.'
+          message: 'Review is paused while CIP-0116 is resolved. This page will update when review resumes.',
+          next: "You don't need to do anything. Review picks up again once CIP-0116 is resolved."
         },
         not_approved: {
           label: 'Not approved', tone: 'bad',
@@ -283,6 +417,7 @@
       back: '← {name}',
       backLabel: 'Back to {name}',  // what screen readers hear for the back link
       forApp: 'For Featured App {name}',
+      appCard: 'For Featured App',  // heading of the side card that links back to the application
       progressLabel: 'Request progress',
       publicRecord: 'Public record',
       recordIntro: 'Your request on the accountability mailing list:',
@@ -296,7 +431,8 @@
         },
         with_tokenomics: {
           label: 'With Tokenomics Committee', tone: 'info',
-          message: 'The Featured App Committee approved your request. The Tokenomics Committee is doing the final review.'
+          message: 'The Featured App Committee approved your request. The Tokenomics Committee is doing the final review.',
+          next: 'Once the Tokenomics Committee approves, the final approval date appears on this page.'
         },
         approved: {
           label: 'Approved', tone: 'ok',
@@ -374,8 +510,21 @@
   // later). Their timeline leaves out lock and testing steps with no data.
   const FA_GRANTED = ['approved', 'revoked'];
 
-  // Screens that use the narrow, centred column.
-  const NARROW_SCREENS = ['start', 'sent', 'loading', 'invalid', 'error'];
+  // FA states still moving through review, for the "in progress" chip on the list.
+  const FA_ACTIVE = ['received', 'in_review', 'with_tokenomics', 'on_hold'];
+
+  const DAY_MS = 86400000;
+
+  // Stroke icons (24 x 24 viewBox), drawn with currentColor by the .icon class.
+  const ICONS = {
+    lock: ['M7 11h10a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z', 'M8 11V7a4 4 0 0 1 8 0v4'],
+    refresh: ['M21 12a9 9 0 1 1-2.6-6.4', 'M21 4v5h-5'],
+    layers: ['m12 3 9 5-9 5-9-5 9-5z', 'm3 13 9 5 9-5'],
+    mail: ['M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z', 'm3 7 9 6 9-6'],
+    arrow: ['M5 12h14', 'm13 6 6 6-6 6'],
+    copy: ['M11 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z', 'M5 15V5a2 2 0 0 1 2-2h10'],
+    message: ['M4 5h16v11H8l-4 4V5z']
+  };
 
   // Screens that show the "Private link" badge in the header.
   const PRIVATE_SCREENS = ['list', 'app', 'dvp'];
@@ -443,9 +592,15 @@
    * as 2026-02-31); callers leave empty dates out.
    */
   function formatDate(value) {
-    if (typeof value !== 'string') return '';
+    const date = parseDay(value);
+    return date ? DATE_FORMAT.format(date) : '';
+  }
+
+  /** An API date ("YYYY-MM-DD") as a Date at midnight UTC, or null if it isn't a real date. */
+  function parseDay(value) {
+    if (typeof value !== 'string') return null;
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
-    if (!match) return '';
+    if (!match) return null;
     const year = Number(match[1]);
     const month = Number(match[2]);
     const day = Number(match[3]);
@@ -453,9 +608,33 @@
     // Reject dates that roll over (2026-02-31) and years below 100, which
     // Date.UTC would read as 19xx.
     if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
-      return '';
+      return null;
     }
-    return DATE_FORMAT.format(date);
+    return date;
+  }
+
+  /**
+   * How long ago an API date was, in words: "Today", "Yesterday",
+   * "34 days ago", "3 months ago", "2 years ago". "" for a future or invalid
+   * date. Counted in whole UTC days, like formatDate.
+   */
+  function agoText(value) {
+    const date = parseDay(value);
+    if (!date) return '';
+    const now = new Date();
+    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const days = Math.round((today - date.getTime()) / DAY_MS);
+    const words = TEXT.ago;
+    if (days < 0) return '';
+    if (days === 0) return words.today;
+    if (days === 1) return words.yesterday;
+    if (days < 45) return fillText(words.days, { n: String(days) });
+    if (days < 365) {
+      const months = Math.max(1, Math.round(days / 30.44));
+      return months === 1 ? words.month : fillText(words.months, { n: String(months) });
+    }
+    const years = Math.floor(days / 365.25);
+    return years <= 1 ? words.year : fillText(words.years, { n: String(years) });
   }
 
   /** A trimmed string for text fields; numbers become strings; anything else is "". */
@@ -656,6 +835,99 @@
     return el('span', { class: 'pill ' + tone, 'data-state': state || null, text: label });
   }
 
+  /** A decorative stroke icon from ICONS (hidden from screen readers). */
+  function icon(name, className) {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('class', 'icon' + (className ? ' ' + className : ''));
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    ICONS[name].forEach(function (d) {
+      const path = document.createElementNS(ns, 'path');
+      path.setAttribute('d', d);
+      svg.appendChild(path);
+    });
+    return svg;
+  }
+
+  /** The purple band at the top of a screen; `extra` adds classes. */
+  function hero(children, extra) {
+    return el('section', { class: 'hero' + (extra ? ' ' + extra : '') },
+      el('div', { class: 'wrap hero-inner' + (extra ? ' ' + extra + '-inner' : '') }, children));
+  }
+
+  /** The screen's eyebrow, h1 (focus target) and intro line, inside the band. */
+  function heroHead(eyebrow, heading, body) {
+    return el('div', { class: 'd-head' }, [
+      eyebrow ? el('p', { class: 'hero-eyebrow', text: eyebrow }) : null,
+      el('h1', { class: 'p-h', tabindex: '-1', text: heading }),
+      body ? el('p', { class: 'p-sub' }, body) : null
+    ]);
+  }
+
+  /** Title block and status side by side in the band: pill plus "Step 5 of 6 · ...". */
+  function heroTitle(head, words, state, steps) {
+    const progress = progressText(steps);
+    return el('div', { class: 'hero-title' }, [
+      head,
+      el('div', { class: 'hero-status' }, [
+        pill(words.label, words.tone + ' big', state),
+        progress ? el('p', { class: 'hero-progress', text: progress }) : null
+      ])
+    ]);
+  }
+
+  /** "Step 5 of 6 · Tokenomics Committee review", "All steps complete", or "" once a stop step is reached. */
+  function progressText(steps) {
+    if (steps.some(function (s) { return s.state === 'stop'; })) return '';
+    let open = -1;
+    for (let i = 0; i < steps.length; i += 1) {
+      if (steps[i].state !== 'done') { open = i; break; }
+    }
+    if (open === -1) return TEXT.progress.allDone;
+    return joinParts([
+      fillText(TEXT.progress.step, { n: String(open + 1), total: String(steps.length) }),
+      steps[open].title
+    ]);
+  }
+
+  /** A row of segments, one per step, coloured by the step's state (decoration only). */
+  function progressBar(states) {
+    return el('span', { class: 'progress', 'aria-hidden': 'true' }, states.map(function (state) {
+      return el('span', { class: 'seg ' + state });
+    }));
+  }
+
+  /** The number tiles under the band; null when there are none. */
+  function tilesRow(tiles) {
+    const list = tiles.filter(Boolean);
+    if (!list.length) return null;
+    return el('div', { class: 'wrap overlap' }, el('dl', { class: 'tiles' }, list.map(function (t) {
+      return el('div', { class: 'card tile' }, [
+        el('dt', { class: 'tile-label', text: t.label }),
+        el('dd', { class: 'tile-value', text: t.value }),
+        t.sub ? el('dd', { class: 'tile-sub', text: t.sub }) : null
+      ]);
+    })));
+  }
+
+  /** A date tile: "34 days ago" over "14 Oct 2026" (just the date if it's in the future). */
+  function dateTile(label, value) {
+    const date = formatDate(value);
+    if (!date) return null;
+    const ago = agoText(value);
+    return ago ? { label: label, value: ago, sub: date } : { label: label, value: date, sub: '' };
+  }
+
+  /** The main and side columns below the band. `overlap` when there are no tiles above. */
+  function columns(mainChildren, sideChildren, overlap) {
+    return el('div', { class: 'wrap cols' + (overlap ? ' overlap' : '') }, [
+      el('div', { class: 'col-main' }, mainChildren),
+      el('aside', { class: 'col-side' }, sideChildren)
+    ]);
+  }
+
   /** The page heading block: eyebrow, h1 (focus target) and meta line. */
   function pageHead(eyebrow, title, meta) {
     const hasMeta = Array.isArray(meta) ? meta.some(Boolean) : Boolean(meta);
@@ -666,13 +938,24 @@
     ]);
   }
 
-  /** The status box: pill, message, optional extra (link or contact line), last update. */
-  function statusBox(state, words, extra, updated) {
+  /**
+   * The status box: "Where things stand", the message, an optional extra
+   * (link or contact line), "What happens next" when the state has one, and
+   * the last update. The pill itself sits in the band (heroTitle).
+   */
+  function statusBox(words, extra, updated) {
     const lastUpdated = formatDate(updated);
-    return el('section', { class: 'status-box', 'aria-label': TEXT.statusLabel }, [
-      pill(words.label, words.tone, state),
+    return el('section', { class: 'card status-box', 'data-section': 'status' }, [
+      el('h2', { class: 'card-h', text: TEXT.statusHeading }),
       el('p', { class: 'status-message', text: words.message }),
       extra,
+      words.next ? el('div', { class: 'next' }, [
+        icon('arrow'),
+        el('div', null, [
+          el('p', { class: 'next-h', text: TEXT.nextHeading }),
+          el('p', { class: 'next-text', text: words.next })
+        ])
+      ]) : null,
       lastUpdated ? el('p', { class: 'when', text: fillText(TEXT.lastUpdated, { date: lastUpdated }) }) : null
     ]);
   }
@@ -682,17 +965,33 @@
     return el('p', { class: 'status-contact' }, fill(TEXT.contact, { email: emailLink() }));
   }
 
-  /** A section below the timeline, with a stable data-section hook. */
+  /** A card below the band, with a stable data-section hook. */
   function section(key, heading, content) {
-    return el('section', { class: 'p-section', 'data-section': key }, [
-      el('h2', { text: heading }),
+    return el('section', { class: 'card', 'data-section': key }, [
+      el('h2', { class: 'card-h', text: heading }),
       content
     ]);
   }
 
-  /** The note about sharing the link, at the bottom of application and DVP pages. */
+  /** The note about sharing the link, at the bottom of the list. */
   function footerNote() {
-    return el('p', { class: 'p-fine p-foot', 'data-footnote': '' }, fill(TEXT.footer, { email: emailLink() }));
+    return el('p', { class: 'p-fine privacy-note', 'data-footnote': '' }, [
+      icon('lock'),
+      el('span', null, fill(TEXT.footer, { email: emailLink() }))
+    ]);
+  }
+
+  /** The help box at the bottom of the side column, with the sharing note. */
+  function helpCard(heading) {
+    const email = textOf(CONFIG.supportEmail);
+    return el('section', { class: 'card help', 'data-section': 'help' }, [
+      el('h2', { class: 'help-h', text: heading }),
+      el('p', { class: 'p-fine', text: TEXT.help.text }),
+      EMAIL_PATTERN.test(email)
+        ? el('a', { class: 'p-btn secondary help-btn', href: 'mailto:' + email, text: fillText(TEXT.help.button, { email: email }) })
+        : null,
+      el('p', { class: 'privacy', 'data-footnote': '' }, [icon('lock'), el('span', { text: TEXT.help.privateNote })])
+    ]);
   }
 
   // ===========================================================================
@@ -856,7 +1155,7 @@
    */
   function show(screen, title, content) {
     main.textContent = '';
-    main.className = NARROW_SCREENS.indexOf(screen) !== -1 ? 'p-body p-narrow' : 'p-body';
+    main.className = 'p-main';
     main.setAttribute('data-screen', screen);
     append(main, content);
 
@@ -874,7 +1173,7 @@
     }
   }
 
-  /** A heading and one paragraph (the top of start, invalid and error screens). */
+  /** A heading and one paragraph (the top of the error screen). */
   function messageHead(heading, body) {
     return el('div', { class: 'd-head' }, [
       el('h1', { class: 'p-h', tabindex: '-1', text: heading }),
@@ -882,10 +1181,27 @@
     ]);
   }
 
+  // ---- Start, sent and invalid: the band with the form, then what the page is
+
+  /**
+   * The layout shared by the start, sent and invalid screens: the band with
+   * `heroMain` and the example card, then the promises, how review works,
+   * the statuses and the FAQ.
+   */
+  function startLayout(screen, heroMain) {
+    show(screen, null, [
+      hero([el('div', { class: 'hero-main' }, heroMain), exampleCard()], 'hero-start'),
+      promisesSection(),
+      howSection(),
+      statusesSection(),
+      faqSection()
+    ]);
+  }
+
   /** The start page: what this is, and the email form. */
   function showStart(prefill) {
-    show('start', null, [
-      messageHead(TEXT.start.heading, TEXT.start.body),
+    startLayout('start', [
+      heroHead(TEXT.start.eyebrow, TEXT.start.heading, TEXT.start.body),
       emailForm(prefill),
       el('p', { class: 'p-fine' }, fill(TEXT.start.fine, { email: emailLink() }))
     ]);
@@ -899,8 +1215,9 @@
     }
     const again = el('button', { class: 'p-btn secondary', type: 'button', 'data-action': 'again', text: TEXT.sent.again });
     again.addEventListener('click', function () { showStart(''); });
-    show('sent', null, [
-      messageHead(TEXT.sent.heading, fill(TEXT.sent.body, { address: el('strong', { class: 'address', text: address }) })),
+    startLayout('sent', [
+      heroHead(TEXT.start.eyebrow, TEXT.sent.heading,
+        fill(TEXT.sent.body, { address: el('strong', { class: 'address', text: address }) })),
       el('p', { class: 'p-fine' }, fill(TEXT.sent.noEmail, { email: emailLink() })),
       again
     ]);
@@ -908,80 +1225,249 @@
 
   /** A link that doesn't work: say so, and offer the email form. */
   function showInvalid() {
-    show('invalid', null, [
-      messageHead(TEXT.invalid.heading, TEXT.invalid.body),
+    startLayout('invalid', [
+      heroHead(TEXT.start.eyebrow, TEXT.invalid.heading, TEXT.invalid.body),
       emailForm(''),
       el('p', { class: 'p-fine' }, fill(TEXT.start.fine, { email: emailLink() }))
     ]);
   }
 
-  function showError() {
-    const retry = el('button', { class: 'p-btn', type: 'button', 'data-action': 'retry', text: TEXT.error.retry });
-    retry.addEventListener('click', retryRequest);
-    show('error', null, [
-      messageHead(TEXT.error.heading, fill(TEXT.error.body, { email: emailLink() })),
-      retry
+  /** The sample status card next to the form. Decoration: hidden from screen readers. */
+  function exampleCard() {
+    const x = TEXT.about.example;
+    return el('div', { class: 'example', 'aria-hidden': 'true' }, [
+      el('div', { class: 'example-top' }, [
+        el('span', { class: 'eyebrow', text: x.eyebrow }),
+        el('span', { class: 'example-tag', text: x.tag })
+      ]),
+      el('p', { class: 'example-name', text: x.name }),
+      el('p', { class: 'example-meta', text: x.meta }),
+      pill(x.pill, 'info'),
+      progressBar(['done', 'done', 'done', 'current', 'todo', 'todo']),
+      el('p', { class: 'example-step' }, [el('strong', { text: x.step }), TEXT.separator + x.stepName]),
+      el('div', { class: 'example-email' }, [
+        icon('mail'),
+        el('div', null, [
+          el('p', { class: 'example-email-label', text: x.email }),
+          el('p', { class: 'example-email-title', text: x.emailTitle })
+        ])
+      ])
     ]);
   }
 
-  function showLoading() {
-    show('loading', null, el('div', { class: 'loading', role: 'status' }, [
-      el('span', { class: 'spinner', 'aria-hidden': 'true' }),
-      el('p', { text: TEXT.loading })
+  /** Eyebrow, h2 and an optional intro, at the top of a start-page section. */
+  function infoHead(words, intro) {
+    return el('div', { class: 'info-head' }, [
+      el('p', { class: 'eyebrow', text: words.eyebrow }),
+      el('h2', { class: 'info-h', text: words.heading }),
+      intro ? el('p', { class: 'p-sub' }, intro) : null
+    ]);
+  }
+
+  /** Three cards on the edge of the band: private, current, complete. */
+  function promisesSection() {
+    return el('section', { class: 'wrap overlap', 'aria-label': TEXT.about.promisesLabel },
+      el('ul', { class: 'promises' }, TEXT.about.promises.map(function (p) {
+        return el('li', { class: 'card promise' }, [
+          icon(p.icon),
+          el('p', { class: 'promise-title', text: p.title }),
+          el('p', { class: 'p-fine', text: p.text })
+        ]);
+      })));
+  }
+
+  /** "How review works": the six timeline steps, explained. */
+  function howSection() {
+    const how = TEXT.about.how;
+    return el('section', { class: 'wrap info-section', 'data-section': 'how' }, [
+      infoHead(how, how.intro),
+      el('ol', { class: 'how-steps' }, how.steps.map(function (s, i) {
+        return el('li', { class: 'card how-step' }, [
+          el('span', { class: 'how-n', text: (i < 9 ? '0' : '') + (i + 1) }),
+          el('span', { class: 'how-title', text: TEXT.fa.steps[s.key] }),
+          el('span', { class: 'p-fine', text: s.text })
+        ]);
+      }))
+    ]);
+  }
+
+  /** "What each status means": every FA state's pill and message. */
+  function statusesSection() {
+    const states = TEXT.fa.states;
+    return el('section', { class: 'wrap info-section', 'data-section': 'statuses' }, [
+      infoHead(TEXT.about.statuses),
+      el('ul', { class: 'card glossary' }, Object.keys(states).map(function (key) {
+        return el('li', null, [pill(states[key].label, states[key].tone), el('p', { class: 'p-fine', text: states[key].message })]);
+      }))
+    ]);
+  }
+
+  /** The FAQ, as native <details> (no script needed to open them). */
+  function faqSection() {
+    const faq = TEXT.about.faq;
+    return el('section', { class: 'wrap info-section faq', 'data-section': 'faq' }, [
+      infoHead(faq, fill(faq.intro, { email: emailLink() })),
+      el('div', { class: 'faq-list' }, faq.items.map(function (item) {
+        return el('details', null, [
+          el('summary', null, el('span', { class: 'faq-q', text: item.q })),
+          el('p', { class: 'faq-a' }, fill(item.a, { email: emailLink() }))
+        ]);
+      }))
+    ]);
+  }
+
+  // ---- Screens without application data
+
+  function showError() {
+    const retry = el('button', { class: 'p-btn', type: 'button', 'data-action': 'retry', text: TEXT.error.retry });
+    retry.addEventListener('click', retryRequest);
+    show('error', null, el('div', { class: 'p-body p-narrow' }, [
+      messageHead(TEXT.error.heading, fill(TEXT.error.body, { email: emailLink() })),
+      retry
     ]));
   }
 
-  /** Several applications: one card each, newest first (the backend's order). */
+  function showLoading() {
+    show('loading', null, el('div', { class: 'p-body p-narrow' }, el('div', { class: 'loading', role: 'status' }, [
+      el('span', { class: 'spinner', 'aria-hidden': 'true' }),
+      el('p', { text: TEXT.loading })
+    ])));
+  }
+
+  // ---- The list of applications
+
+  /** Several applications: count chips in the band, then one card each, newest first (the backend's order). */
   function showList(code, apps) {
+    const counts = { active: 0, approved: 0, ended: 0 };
     const cards = apps.map(function (app) {
       const state = normalizeState(app.state, TEXT.fa.states, 'in_review');
       const words = TEXT.fa.states[state];
+      if (FA_ACTIVE.indexOf(state) !== -1) counts.active += 1;
+      else if (state === 'approved') counts.approved += 1;
+      else counts.ended += 1;
+
+      const steps = faSteps(app, state);
+      const progress = progressText(steps);
+      const updated = formatDate(app.updated);
       const count = dvpOf(app).length;
       const meta = joinParts([
         textOf(app.institution),
         submittedText(app.submitted),
         count === 1 ? TEXT.list.dvpOne : count > 1 ? fillText(TEXT.list.dvpMany, { count: String(count) }) : ''
       ]);
+      const email = latestEmail(app);
       // The spaces keep the card's text (and so the link's accessible name) readable.
       const content = [
-        el('span', { class: 'app-name', text: textOf(app.name) || TEXT.fa.untitled }),
+        el('span', { class: 'app-top' }, [
+          el('span', { class: 'app-name', text: textOf(app.name) || TEXT.fa.untitled }),
+          ' ',
+          pill(words.label, words.tone, state)
+        ]),
+        meta ? [' ', el('span', { class: 'app-meta', text: meta })] : null,
         ' ',
-        pill(words.label, words.tone, state),
-        meta ? [' ', el('span', { class: 'app-meta', text: meta })] : null
+        el('span', { class: 'app-progress' }, [
+          progressBar(steps.map(function (s) { return s.state; })),
+          el('span', { class: 'app-progress-text' }, [
+            progress ? el('span', { class: 'app-step', text: progress }) : null,
+            ' ',
+            updated ? el('span', { text: fillText(TEXT.lastUpdated, { date: updated }) }) : null
+          ])
+        ]),
+        email ? [' ', el('span', { class: 'app-email' }, [
+          icon('mail'),
+          el('span', { text: joinParts([fillText(TEXT.list.email, { title: email.words.title }), email.date]) })
+        ])] : null
       ];
       const id = idOf(app);
       const card = id
-        ? el('a', { class: 'app', href: '#' + code + '/app-' + id, 'data-app-id': id }, content)
-        : el('div', { class: 'app' }, content);
+        ? el('a', { class: 'app app-lg', href: '#' + code + '/app-' + id, 'data-app-id': id }, content)
+        : el('div', { class: 'app app-lg' }, content);
       return el('li', null, card);
     });
+
+    const dvpTotal = apps.reduce(function (sum, app) { return sum + dvpOf(app).length; }, 0);
+    const chipWords = TEXT.list.chips;
+    const chips = [
+      apps.length === 1 ? chipWords.appsOne : fillText(chipWords.appsMany, { count: String(apps.length) }),
+      counts.active ? fillText(chipWords.active, { count: String(counts.active) }) : '',
+      counts.approved ? fillText(chipWords.approved, { count: String(counts.approved) }) : '',
+      counts.ended ? fillText(chipWords.ended, { count: String(counts.ended) }) : '',
+      dvpTotal === 1 ? TEXT.list.dvpOne : dvpTotal > 1 ? fillText(TEXT.list.dvpMany, { count: String(dvpTotal) }) : ''
+    ].filter(Boolean);
+
     show('list', TEXT.list.heading, [
-      pageHead(null, TEXT.list.heading, TEXT.list.intro),
-      el('ul', { class: 'app-list' }, cards),
-      footerNote()
+      hero([
+        heroHead(TEXT.list.eyebrow, TEXT.list.heading, TEXT.list.intro),
+        el('ul', { class: 'chips' }, chips.map(function (text) { return el('li', { class: 'chip', text: text }); }))
+      ]),
+      el('div', { class: 'wrap overlap list-body' }, [
+        el('ul', { class: 'app-list' }, cards),
+        footerNote()
+      ])
     ]);
   }
+
+  // ---- The application page
 
   /** The application page. With several applications, a link leads back to the list. */
   function showApp(code, apps, app) {
     const state = normalizeState(app.state, TEXT.fa.states, 'in_review');
     const words = TEXT.fa.states[state];
     const name = textOf(app.name) || TEXT.fa.untitled;
+    const steps = faSteps(app, state);
+    const tiles = tilesRow(faTiles(app, state));
 
     show('app', name, [
-      apps.length > 1 ? el('a', { class: 'back', href: '#' + code, text: TEXT.list.back }) : null,
-      pageHead(TEXT.fa.eyebrow, name, joinParts([
-        textOf(app.institution),
-        textOf(app.type),
-        submittedText(app.submitted)
-      ])),
-      statusBox(state, words, faStatusExtra(app, state, words), app.updated),
-      updateSection(app),
-      timeline(TEXT.fa.progressLabel, faSteps(app, state)),
-      onFileSection(app),
-      dvpListSection(code, apps, app),
-      footerNote()
+      hero([
+        apps.length > 1 ? el('a', { class: 'back', href: '#' + code, text: TEXT.list.back }) : null,
+        heroTitle(pageHead(TEXT.fa.eyebrow, name, joinParts([
+          textOf(app.institution),
+          textOf(app.type),
+          submittedText(app.submitted)
+        ])), words, state, steps),
+        timeline(TEXT.fa.progressLabel, steps)
+      ]),
+      tiles,
+      columns([
+        statusBox(words, faStatusExtra(app, state, words), app.updated),
+        updateSection(app),
+        activitySection(faActivity(app, words))
+      ], [
+        onFileSection(app),
+        dvpListSection(code, apps, app),
+        helpCard(TEXT.help.app)
+      ], !tiles)
     ]);
+  }
+
+  /** The application's number tiles: submitted, Canton Coin locked, testing, last updated. */
+  function faTiles(app, state) {
+    const t = TEXT.tiles;
+    const ended = FA_ENDED_EARLY.indexOf(state) !== -1;
+    const granted = FA_GRANTED.indexOf(state) !== -1;
+    const tiles = [dateTile(t.submitted, app.submitted)];
+
+    // Canton Coin lock: the amount when known, else "Verified" or "Not verified yet".
+    const lock = isObject(app.lock) ? app.lock : {};
+    const amount = formatAmount(lock.amountMillions);
+    const verified = formatDate(lock.verified);
+    if (amount) {
+      tiles.push({ label: t.locked, value: fillText(t.lockAmount, { amount: amount }), sub: verified ? fillText(t.lockVerified, { date: verified }) : '' });
+    } else if (verified) {
+      tiles.push({ label: t.locked, value: t.verified, sub: verified });
+    } else if (!ended && !granted) {
+      tiles.push({ label: t.locked, value: t.notVerified, sub: '' });
+    }
+
+    // Testing, while the application is still in review (as on the timeline).
+    const testing = normalizeTesting(app.testing);
+    if (!ended && !(granted && testing === 'not_started')) {
+      const testingWords = TEXT.fa.testing[testing];
+      tiles.push({ label: t.testing, value: testingWords.flag || testingWords.detail, sub: testingWords.flag ? testingWords.detail : '' });
+    }
+
+    tiles.push(dateTile(t.lastUpdated, app.updated));
+    return tiles;
   }
 
   /** What goes under the FA status message: a link or the contact line, or nothing. */
@@ -992,53 +1478,130 @@
     }
     if (state === 'closed_process') {
       const reapply = parseHttpsUrl(CONFIG.reapplyUrl);
-      return reapply ? externalLink(reapply, words.linkText, 'status-action p-btn secondary') : null;
+      return reapply ? externalLink(reapply, words.linkText, 'status-action p-btn') : null;
     }
     return words.contact ? contactLine() : null;
   }
 
-  /** "Latest email from the committee" (app.update); null when there is none or its kind is unknown. */
-  function updateSection(app) {
+  /** The latest committee email (app.update) as { kind, words, date, iso }, or null when there is none or its kind is unknown. */
+  function latestEmail(app) {
     const update = isObject(app.update) ? app.update : null;
     const kind = update ? textOf(update.kind) : '';
     if (!kind || !hasOwn(TEXT.fa.update.kinds, kind)) return null;
-    const words = TEXT.fa.update.kinds[kind];
-    const date = formatDate(update.date);
+    return { kind: kind, words: TEXT.fa.update.kinds[kind], date: formatDate(update.date), iso: textOf(update.date) };
+  }
+
+  /** "Latest email from the committee"; null when there is none. */
+  function updateSection(app) {
+    const email = latestEmail(app);
+    if (!email) return null;
+    const words = email.words;
     const link = words.link === 'reapply' ? parseHttpsUrl(CONFIG.reapplyUrl) : null;
-    return el('section', { class: 'p-update', 'data-update': kind, 'aria-label': TEXT.fa.update.heading }, [
-      el('p', { class: 'd-eyebrow', text: TEXT.fa.update.heading }),
-      el('p', { class: 'update-title', text: words.title }),
-      el('p', { text: words.text }),
-      link ? externalLink(link, words.linkText, 'status-action') : null,
-      date ? el('p', { class: 'when', text: fillText(TEXT.fa.update.emailed, { date: date }) }) : null
+    return el('section', { class: 'card p-update', 'data-update': email.kind, 'aria-label': TEXT.fa.update.heading }, [
+      el('span', { class: 'card-icon' }, icon('mail')),
+      el('div', { class: 'update-body' }, [
+        el('h2', { class: 'card-h', text: TEXT.fa.update.heading }),
+        el('p', { class: 'update-title', text: words.title }),
+        el('p', { text: words.text }),
+        link ? externalLink(link, words.linkText, 'status-action') : null,
+        email.date ? el('p', { class: 'when', text: fillText(TEXT.fa.update.emailed, { date: email.date }) }) : null
+      ])
     ]);
   }
 
-  /** "On file": Featured App type, Party ID and product site; null when all are missing. */
+  /**
+   * The application's dated events, newest first: the committee's latest
+   * email, the last record change, DVP requests submitted and approved, the
+   * lock verification, and the submission. Events without a date are left out.
+   */
+  function faActivity(app, words) {
+    const a = TEXT.activity;
+    const events = [];
+    function add(value, title, detail) {
+      const date = formatDate(value);
+      if (date) events.push({ iso: value.trim(), date: date, title: title, detail: detail || '' });
+    }
+    const email = latestEmail(app);
+    if (email) add(email.iso, a.emailed, email.words.title);
+    add(textOf(app.updated), a.recordUpdated, fillText(a.status, { status: words.label }));
+    dvpOf(app).forEach(function (request) {
+      const name = textOf(request.name) || TEXT.dvp.untitled;
+      add(textOf(request.finalApproval), a.dvpApproved, name);
+      add(textOf(request.submitted), a.dvpSubmitted, name);
+    });
+    const lock = isObject(app.lock) ? app.lock : {};
+    const amount = formatAmount(lock.amountMillions);
+    add(textOf(lock.verified), a.lockVerified, amount ? fillText(TEXT.fa.details.lockAmount, { amount: amount }) : '');
+    add(textOf(app.submitted), a.submitted, '');
+    // Newest first; Array.prototype.sort is stable, so same-day events keep the order above.
+    return events.sort(function (x, y) { return x.iso < y.iso ? 1 : x.iso > y.iso ? -1 : 0; });
+  }
+
+  /** "Activity"; null with fewer than two events (one would only repeat the submission date). */
+  function activitySection(events) {
+    if (events.length < 2) return null;
+    return section('activity', TEXT.activity.heading, el('ol', { class: 'activity' }, events.map(function (e) {
+      return el('li', null, [
+        el('time', { class: 'activity-date', datetime: e.iso, text: e.date }),
+        el('span', { class: 'activity-dot', 'aria-hidden': 'true' }),
+        el('span', { class: 'activity-body' }, [
+          el('span', { class: 'activity-title', text: e.title }),
+          e.detail ? el('span', { class: 'activity-detail', text: e.detail }) : null
+        ])
+      ]);
+    })));
+  }
+
+  /** "On file": Featured App type, issuer type, Party ID (with a copy button) and product site; null when all are missing. */
   function onFileSection(app) {
     const rows = [];
-    const faType = textOf(app.faType);
-    if (faType) {
-      rows.push(
-        el('dt', { text: TEXT.fa.faType }),
-        el('dd', { 'data-field': 'fa-type', text: faType })
-      );
+    function row(label, value) {
+      rows.push(el('div', { class: 'kv-row' }, [el('dt', { text: label }), value]));
     }
+    const faType = textOf(app.faType);
+    if (faType) row(TEXT.fa.faType, el('dd', { 'data-field': 'fa-type', text: faType }));
+    const type = textOf(app.type);
+    if (type) row(TEXT.fa.issuerType, el('dd', { 'data-field': 'type', text: type }));
     const partyId = textOf(app.partyId);
     if (partyId) {
-      rows.push(
-        el('dt', { text: TEXT.fa.partyId }),
-        el('dd', { class: 'mono', 'data-field': 'party-id', text: partyId })
-      );
+      row(TEXT.fa.partyId, el('dd', { class: 'party' }, [
+        el('span', { class: 'mono party-id', 'data-field': 'party-id', text: partyId }),
+        copyButton(partyId)
+      ]));
     }
     const website = parseHttpsUrl(app.website);
-    if (website) {
-      rows.push(
-        el('dt', { text: TEXT.fa.productSite }),
-        el('dd', { 'data-field': 'website' }, externalLink(website, displayUrl(website), 'url-text'))
-      );
-    }
+    if (website) row(TEXT.fa.productSite, el('dd', { 'data-field': 'website' }, externalLink(website, displayUrl(website) + ' ↗', 'url-text')));
     return rows.length ? section('on-file', TEXT.fa.onFile, el('dl', { class: 'kv' }, rows)) : null;
+  }
+
+  /** "Copy Party ID", only where the browser allows writing to the clipboard. */
+  function copyButton(text) {
+    if (!window.isSecureContext || !navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') return null;
+    const label = el('span', { text: TEXT.fa.copy });
+    const button = el('button', { class: 'copy', type: 'button', 'data-action': 'copy' }, [icon('copy'), label]);
+    let timer = 0;
+    button.addEventListener('click', function () {
+      navigator.clipboard.writeText(text).then(function () {
+        label.textContent = TEXT.fa.copied;
+        window.clearTimeout(timer);
+        timer = window.setTimeout(function () { label.textContent = TEXT.fa.copy; }, 2000);
+      }, function () {
+        // Clipboard refused (permissions): the ID stays selectable on the page.
+      });
+    });
+    return button;
+  }
+
+  /** The app's DVP status (from the FA board), as a line with a pill; null for an empty or unknown value. */
+  function dvpStatusLine(app) {
+    const statusKey = textOf(app.dvpStatus);
+    if (!hasOwn(TEXT.fa.dvpStatus.states, statusKey)) return null;
+    const status = TEXT.fa.dvpStatus.states[statusKey];
+    return el('p', { class: 'dvp-status', 'data-dvp-status': statusKey }, [
+      el('span', { class: 'dvp-status-label', text: TEXT.fa.dvpStatus.label }),
+      ' ',
+      pill(status.label, status.tone, statusKey)
+    ]);
   }
 
   /**
@@ -1047,40 +1610,35 @@
    */
   function dvpListSection(code, apps, app) {
     const requests = dvpOf(app);
-    const statusKey = textOf(app.dvpStatus);
-    const status = hasOwn(TEXT.fa.dvpStatus.states, statusKey) ? TEXT.fa.dvpStatus.states[statusKey] : null;
-    if (requests.length === 0 && !status) return null;
-    const statusLine = status
-      ? el('p', { class: 'dvp-status', 'data-dvp-status': statusKey }, [
-          el('span', { class: 'dvp-status-label', text: TEXT.fa.dvpStatus.label }),
-          ' ',
-          pill(status.label, status.tone, statusKey)
-        ])
-      : null;
+    const statusLine = dvpStatusLine(app);
+    if (requests.length === 0 && !statusLine) return null;
     if (requests.length === 0) return section('dvp', TEXT.fa.dvpHeading, statusLine);
 
     const cards = requests.map(function (request) {
       const state = normalizeState(request.state, TEXT.dvp.states, 'in_review');
       const words = TEXT.dvp.states[state];
-      const submitted = submittedText(request.submitted);
-      // The spaces between the parts are invisible in the grid layout, but
-      // keep the card's text (and so the link's accessible name) readable:
-      // "Harbor Swap: RFQ settlement In committee review Submitted 20 Oct 2026".
+      const ref = textOf(request.requestRef).replace(/^#/, '');
+      const meta = joinParts([submittedText(request.submitted), ref ? fillText(TEXT.dvp.ref, { ref: ref }) : '']);
+      // The spaces between the parts keep the card's text (and so the
+      // link's accessible name) readable.
       const content = [
         el('span', { class: 'app-name', text: textOf(request.name) || TEXT.dvp.untitled }),
         ' ',
         pill(words.label, words.tone, state),
-        submitted ? [' ', el('span', { class: 'app-meta', text: submitted })] : null
+        progressBar(dvpSteps(request, state).map(function (s) { return s.state; })),
+        meta ? [' ', el('span', { class: 'app-meta', text: meta })] : null
       ];
       // A card links to the request's page when the request has a usable id.
       const id = idOf(request);
       const card = id
-        ? el('a', { class: 'app', href: dvpHref(code, apps, app, request), 'data-dvp-id': id }, content)
-        : el('div', { class: 'app' }, content);
+        ? el('a', { class: 'app app-sm', href: dvpHref(code, apps, app, request), 'data-dvp-id': id }, content)
+        : el('div', { class: 'app app-sm' }, content);
       return el('li', null, card);
     });
     return section('dvp', TEXT.fa.dvpHeading, [statusLine, el('ul', { class: 'app-list' }, cards)]);
   }
+
+  // ---- The DVP request page
 
   /** A DVP request's page. */
   function showDvp(code, apps, app, request) {
@@ -1089,6 +1647,7 @@
     const state = normalizeState(request.state, TEXT.dvp.states, 'in_review');
     const words = TEXT.dvp.states[state];
     const name = textOf(request.name) || TEXT.dvp.untitled;
+    const steps = dvpSteps(request, state);
 
     const ref = textOf(request.requestRef).replace(/^#/, '');
     const eyebrow = ref
@@ -1100,18 +1659,51 @@
     const submitted = submittedText(request.submitted);
     if (submitted) meta.push(TEXT.separator, submitted);
 
+    const ended = state === 'not_approved' || state === 'closed';
+    const finalApproval = formatDate(request.finalApproval);
+    const tiles = tilesRow([
+      dateTile(TEXT.tiles.submitted, request.submitted),
+      finalApproval
+        ? { label: TEXT.tiles.finalApproval, value: finalApproval, sub: '' }
+        : ended ? null : { label: TEXT.tiles.finalApproval, value: TEXT.tiles.notYet, sub: '' },
+      dateTile(TEXT.tiles.lastUpdated, request.updated)
+    ]);
+
     show('dvp', name, [
-      el('a', {
-        class: 'back',
-        href: appLink,
-        'aria-label': fillText(TEXT.dvp.backLabel, { name: appName }),
-        text: fillText(TEXT.dvp.back, { name: appName })
-      }),
-      pageHead(eyebrow, name, meta),
-      statusBox(state, words, words.contact ? contactLine() : null, request.updated),
-      timeline(TEXT.dvp.progressLabel, dvpSteps(request, state)),
-      publicRecordSection(request.requestUrl),
-      footerNote()
+      hero([
+        el('a', {
+          class: 'back',
+          href: appLink,
+          'aria-label': fillText(TEXT.dvp.backLabel, { name: appName }),
+          text: fillText(TEXT.dvp.back, { name: appName })
+        }),
+        heroTitle(pageHead(eyebrow, name, meta), words, state, steps),
+        timeline(TEXT.dvp.progressLabel, steps)
+      ]),
+      tiles,
+      columns([
+        statusBox(words, words.contact ? contactLine() : null, request.updated),
+        publicRecordSection(request.requestUrl)
+      ], [
+        appCard(app, appLink),
+        helpCard(TEXT.help.dvp)
+      ], !tiles)
+    ]);
+  }
+
+  /** "For Featured App": a card back to the application, with its status and DVP status. */
+  function appCard(app, appLink) {
+    const state = normalizeState(app.state, TEXT.fa.states, 'in_review');
+    const words = TEXT.fa.states[state];
+    const meta = joinParts([textOf(app.institution), submittedText(app.submitted)]);
+    return section('for-app', TEXT.dvp.appCard, [
+      el('a', { class: 'app app-sm', href: appLink }, [
+        el('span', { class: 'app-name', text: textOf(app.name) || TEXT.fa.untitled }),
+        ' ',
+        pill(words.label, words.tone, state),
+        meta ? [' ', el('span', { class: 'app-meta', text: meta })] : null
+      ]),
+      dvpStatusLine(app)
     ]);
   }
 
@@ -1119,10 +1711,39 @@
   function publicRecordSection(requestUrl) {
     const url = parseHttpsUrl(requestUrl);
     if (!url) return null;
-    return section('record', TEXT.dvp.publicRecord, el('p', { class: 'p-fine record' }, [
-      TEXT.dvp.recordIntro,
-      ' ',
-      externalLink(url, fillText(TEXT.dvp.recordLink, { url: displayUrl(url) }), 'url-text')
+    return el('section', { class: 'card p-update', 'data-section': 'record' }, [
+      el('span', { class: 'card-icon' }, icon('message')),
+      el('div', { class: 'update-body' }, [
+        el('h2', { class: 'card-h', text: TEXT.dvp.publicRecord }),
+        el('p', { text: TEXT.dvp.recordIntro }),
+        externalLink(url, fillText(TEXT.dvp.recordLink, { url: displayUrl(url) }), 'url-text')
+      ])
+    ]);
+  }
+
+  // ---- Footer
+
+  /** Fills the footer (every screen) with the links in TEXT.siteFooter. Runs once. */
+  function renderFooter() {
+    const footer = document.querySelector('[data-footer]');
+    if (!footer) return;
+    const words = TEXT.siteFooter;
+    const groups = words.groups.map(function (group) {
+      const links = group.links.map(function (link) {
+        if (link.email) return emailLink() || null;
+        const url = parseHttpsUrl(link.url === 'reapply' ? CONFIG.reapplyUrl : link.url);
+        return url ? externalLink(url, link.text) : null;
+      }).filter(Boolean);
+      return links.length ? el('div', { class: 'foot-group' }, [el('p', { class: 'foot-h', text: group.heading })].concat(links)) : null;
+    });
+    footer.textContent = '';
+    append(footer, el('div', { class: 'wrap foot-inner' }, [
+      el('div', { class: 'foot-about' }, [
+        // The logo already has a text alternative in the header; here it's decoration.
+        el('img', { class: 'foot-logo', src: 'cf-logo-dark.svg', width: '108', height: '30', alt: '' }),
+        el('p', { text: words.about })
+      ]),
+      el('nav', { class: 'foot-links', 'aria-label': words.label }, groups)
     ]));
   }
 
@@ -1481,6 +2102,7 @@
   window.FAStatus = Object.freeze({ parseRoute: parseRoute, formatDate: formatDate });
 
   if (!main) return;
+  renderFooter();
   window.addEventListener('hashchange', handleRoute);
   handleRoute();
 })();

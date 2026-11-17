@@ -67,7 +67,8 @@ async function shot(page, name, testInfo) {
   await page.screenshot({ path: path.join(SHOTS, name + '-' + testInfo.project.name + '.png'), fullPage: true });
 }
 
-const pill = (page) => page.locator('.status-box .pill');
+// The status pill sits in the band, next to the title.
+const pill = (page) => page.locator('.hero-status .pill');
 const screen = (page, name) => page.locator('main[data-screen="' + name + '"]');
 
 // ------------------------------------------------------------------ the start page and the email form
@@ -354,6 +355,83 @@ test('DVP page: reference, public record, back link, no refetch', async ({ page 
   expect(requests).toHaveLength(1);
 });
 
+// ------------------------------------------------------------------ the redesign: band, tiles, activity, sections
+
+test('start page: how review works, every status, the FAQ, and the footer links', async ({ page }) => {
+  await mockApi(page, { found: false });
+  await page.goto('/');
+  await expect(page.locator('[data-section="how"] li')).toHaveCount(6);
+  await expect(page.locator('[data-section="how"] li').nth(4)).toContainText('Tokenomics Committee review');
+  await expect(page.locator('[data-section="statuses"] .pill')).toHaveCount(9);
+  await expect(page.locator('[data-section="faq"] details')).toHaveCount(6);
+  await page.getByText("I didn't get an email").click();
+  await expect(page.locator('[data-section="faq"] details').first()).toHaveAttribute('open', '');
+  await expect(page.locator('.example')).toHaveAttribute('aria-hidden', 'true');
+  const footer = page.locator('footer[data-footer]');
+  await expect(footer.locator('a[href="https://canton.foundation/featured-app-request/"]')).toHaveCount(1);
+  await expect(footer.locator('a[href="mailto:ops@canton.foundation"]')).toHaveCount(1);
+  await expect(footer.locator('a[target="_blank"]').first()).toHaveAttribute('rel', 'noopener noreferrer');
+});
+
+test('application page: number tiles, "what happens next", activity newest first', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-11-17T12:00:00Z'));
+  await mockApi(page, one({ update: { kind: 'office_hours', date: '2026-11-16' } }));
+  await page.goto('/#' + TOKEN);
+  await expect(page.locator('.hero-progress')).toHaveText('Step 5 of 6 · Tokenomics Committee review');
+  const tiles = page.locator('.tile');
+  await expect(tiles).toHaveCount(4);
+  await expect(tiles.nth(0)).toContainText('34 days ago');
+  await expect(tiles.nth(0)).toContainText('14 Oct 2026');
+  await expect(tiles.nth(1)).toContainText('1.5M CC');
+  await expect(tiles.nth(2)).toContainText('Complete');
+  await expect(tiles.nth(3)).toContainText('14 days ago');
+  await expect(page.locator('.status-box .next')).toContainText('If the Tokenomics Committee approves');
+  const events = page.locator('[data-section="activity"] li');
+  await expect(events).toHaveCount(5);
+  await expect(events.first()).toContainText('16 Nov 2026');
+  await expect(events.first()).toContainText('Office hours invitation');
+  await expect(events.last()).toContainText('Application submitted');
+  await expect(page.locator('[data-section="help"] a')).toHaveAttribute('href', 'mailto:ops@canton.foundation');
+});
+
+test('ended applications: no testing tile, no "what happens next", no progress line', async ({ page }) => {
+  await mockApi(page, one({ state: 'withdrawn', lock: { verified: null, amountMillions: null }, testing: 'not_started', dvp: [] }));
+  await page.goto('/#' + TOKEN);
+  await expect(pill(page)).toHaveText('Withdrawn');
+  await expect(page.locator('.tile')).toHaveCount(2);
+  await expect(page.locator('.tile')).not.toContainText(['Testing']);
+  await expect(page.locator('.status-box .next')).toHaveCount(0);
+  await expect(page.locator('.hero-progress')).toHaveCount(0);
+  await expect(page.locator('[data-section="activity"]')).toHaveCount(1);
+});
+
+test('Copy Party ID writes the ID to the clipboard', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await mockApi(page, one());
+  await page.goto('/#' + TOKEN);
+  await page.locator('[data-action="copy"]').click();
+  await expect(page.locator('[data-action="copy"]')).toHaveText('Copied');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(app().partyId);
+});
+
+test('list: count chips and the progress of each application', async ({ page }) => {
+  await mockApi(page, three());
+  await page.goto('/#' + TOKEN);
+  await expect(page.locator('.chip')).toHaveText(['3 applications', '1 in progress', '1 approved', '1 ended', '1 DVP request']);
+  await expect(page.locator('a.app[data-app-id="101"] .app-step')).toHaveText('Step 5 of 6 · Tokenomics Committee review');
+  await expect(page.locator('a.app[data-app-id="103"] .app-step')).toHaveText('All steps complete');
+  await expect(page.locator('a.app[data-app-id="99"] .app-step')).toHaveCount(0);
+  await expect(page.locator('a.app[data-app-id="101"] .seg')).toHaveCount(6);
+});
+
+test('DVP page: tiles with the final approval, and a card back to the application', async ({ page }) => {
+  await mockApi(page, one());
+  await page.goto('/#' + TOKEN + '/dvp-13557857392');
+  await expect(page.locator('.tile').nth(1)).toContainText('Not yet');
+  await expect(page.locator('[data-section="for-app"] a.app')).toHaveAttribute('href', '#' + TOKEN);
+  await expect(page.locator('[data-section="for-app"] .pill')).toHaveText('With Tokenomics Committee');
+});
+
 // ------------------------------------------------------------------ failures
 
 test('errors show the retry screen, and "Try again" recovers', async ({ page }, testInfo) => {
@@ -442,16 +520,14 @@ test('theme: follows the system until the button is pressed, then remembers the 
   const button = page.locator('[data-theme-toggle]');
   const html = page.locator('html');
   await expect(html).not.toHaveAttribute('data-theme', /./);
-  await expect(page.locator('.p-logo-light')).toBeVisible();
-  await expect(page.locator('.p-logo-dark')).toBeHidden();
+  await expect(page.locator('.p-logo')).toBeVisible();
   await expect(button).toHaveAttribute('aria-label', 'Switch to dark theme');
   const background = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
   expect(await background()).toBe('rgb(255, 255, 252)');
 
   await button.click();
   await expect(html).toHaveAttribute('data-theme', 'dark');
-  await expect(page.locator('.p-logo-dark')).toBeVisible();
-  await expect(page.locator('.p-logo-light')).toBeHidden();
+  await expect(page.locator('.p-logo')).toBeVisible();
   await expect(button).toHaveAttribute('aria-label', 'Switch to white theme');
   expect(await background()).toBe('rgb(24, 2, 49)');
   if (testInfo.project.name === 'desktop') await shot(page, 'app-dark-picked', testInfo);
@@ -467,13 +543,12 @@ test('theme: follows the system until the button is pressed, then remembers the 
   expect(await background()).toBe('rgb(255, 255, 252)');
 });
 
-test('theme: a dark system setting gives the dark theme, the dark logo and a "white" button', async ({ page }) => {
+test('theme: a dark system setting gives the dark theme and a "white" button', async ({ page }) => {
   await mockApi(page, { found: false });
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.goto('/');
   await expect(screen(page, 'start')).toBeVisible();
-  await expect(page.locator('.p-logo-dark')).toBeVisible();
-  await expect(page.locator('.p-logo-light')).toBeHidden();
+  await expect(page.locator('.p-logo')).toBeVisible();
   await expect(page.locator('[data-theme-toggle]')).toHaveAttribute('aria-label', 'Switch to white theme');
   expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(24, 2, 49)');
 });

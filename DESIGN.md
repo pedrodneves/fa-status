@@ -191,11 +191,21 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
 
 **Screens** (`main[data-screen]`): `start`, `sent`, `loading`, `list`, `app`, `dvp`, `invalid` (with the form), `error` (with retry).
 
+**Layout (redesign of 17 Nov 2026):** every screen opens with a purple band (header, title, status), cards sit on its lower edge, and a band-coloured footer closes the page. Everything is built from the response contract; nothing new comes from the backend.
+- `start`, `sent`, `invalid`: the form (or "check your email") next to a sample status card, then three promises (private, refreshed every 10 minutes, applications and DVP), "How review works" (the six steps), "What each status means" (every FA state) and an FAQ (native `<details>`).
+- `list`: count chips in the band; each card has the pill, a progress bar ("Step 5 of 6 · …"), the last update and the latest committee email.
+- `app`: the progress steps run across the band. Below them:
+  - Number tiles: submitted ("34 days ago"), Canton Coin locked, testing, last updated.
+  - Main column: the status box with "What happens next" (`next` in the wording, per state), the latest committee email, and the activity history (dated events, newest first).
+  - Side column: On file (with "Copy Party ID"), DVP, and a help box.
+- `dvp`: the same layout, with tiles for submitted, final approval and last updated, a public-record card, and a card back to the application.
+- The footer links (Featured App request, canton.foundation, the accountability list, the support address) are filled by `status.js` from its wording and `config.js`.
+
 **Look:**
 - Canton Foundation website colours (option A of the theme mockup): Canton black `#030206`, white `#FFFFFC`, deep purple `#180231`, yellow `#F3FF97` buttons, purple `#634BA9` and lilac `#D5A5E3` accents.
-- The official logo, `cf-logo-light.svg` / `cf-logo-dark.svg`. The favicon is the C mark from the same file.
+- The official logo, white-lettered version (`cf-logo-dark.svg`), since the header sits on the band in both themes. `cf-logo-light.svg` is kept for light backgrounds. The favicon is the C mark from the same file.
 - IBM Plex Sans and Mono, served from `docs/fonts/` (SIL Open Font License).
-- A white and a dark theme. The page follows the system setting until the visitor presses the header button. The choice is kept in `localStorage` and applied by `theme.js` before the page paints.
+- A white and a dark theme: the band is deep purple `#180231` on the white theme and Canton black `#030206` on the dark one. The page follows the system setting until the visitor presses the header button. The choice is kept in `localStorage` and applied by `theme.js` before the page paints.
 
 **Safety:**
 - DOM built with `textContent` only.
@@ -206,6 +216,6 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
 
 ## Testing
 
-- `npm test`: 26 Node tests of `Code.gs`, with mocked Google services and a fake Monday. They cover tokens, address extraction, label maps, DVP matching, the cache, privacy (no address, sentinel or token anywhere), doGet/doPost, rate limits, setup, and that no mutation is ever sent.
-- `npm run test:page`: Playwright against the page with a mocked API, desktop and mobile (60 tests).
+- `npm test`: 28 Node tests of `Code.gs`, with mocked Google services and a fake Monday. They cover tokens, address extraction, label maps, DVP matching, the cache, privacy (no address, sentinel or token anywhere), doGet/doPost, rate limits, setup, and that no mutation is ever sent.
+- `npm run test:page`: Playwright against the page with a mocked API, desktop and mobile (82 tests).
 - `npm run live-check`: the real boards, read-only, with mocked email. Every address resolves to its rows, nothing leaks, and no write is sent. Last run on 16 Nov 2026: 11/11 passed.

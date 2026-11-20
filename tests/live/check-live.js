@@ -75,7 +75,7 @@ const setupLine = JSON.parse(env.logs.find((l) => l.text.indexOf('"mode":"setup"
 check('no expected column is missing on either board', setupLine.missingColumns.fa.length === 0 && setupLine.missingColumns.dvp.length === 0,
   JSON.stringify(setupLine.missingColumns));
 const unknownLabels = JSON.parse(env.logs.filter((l) => l.text.indexOf('"mode":"refresh"') !== -1).pop().text).unknownLabels;
-check('every FA Status / Testing / DVP / DVP Status / Send Email label is known', ['fa', 'testing', 'dvp', 'dvpStatus', 'email'].every((b) => Object.keys(unknownLabels[b]).length === 0),
+check('every FA Status / DVP / DVP Status / Send Email label is known', ['fa', 'dvp', 'dvpStatus', 'email'].every((b) => Object.keys(unknownLabels[b]).length === 0),
   JSON.stringify(unknownLabels));
 check('largest cache shard is well under 100 KB', stats.cacheLargestShard < 60000, stats.cacheLargestShard + ' bytes');
 console.log('     addresses ' + stats.addresses + ', apps reachable ' + stats.appsServed + ', apps without an email ' + stats.appsWithoutEmail +
@@ -109,13 +109,13 @@ answers.split('\n').forEach((line) => {
   const body = JSON.parse(line);
   (body.apps || []).forEach((a) => { Object.keys(a).forEach((k) => keys.add('app.' + k)); (a.dvp || []).forEach((d) => Object.keys(d).forEach((k) => keys.add('dvp.' + k))); });
 });
-const allowed = ['app.id', 'app.name', 'app.institution', 'app.type', 'app.faType', 'app.dvpStatus', 'app.submitted', 'app.state', 'app.lock', 'app.testing', 'app.partyId',
+const allowed = ['app.id', 'app.name', 'app.institution', 'app.type', 'app.faType', 'app.dvpStatus', 'app.submitted', 'app.state', 'app.lock', 'app.partyId',
   'app.website', 'app.announcement', 'app.update', 'app.updated', 'app.dvp', 'app.history', 'dvp.id', 'dvp.name', 'dvp.state', 'dvp.submitted', 'dvp.finalApproval',
   'dvp.requestUrl', 'dvp.requestRef', 'dvp.updated'];
 check('answers carry only allow-listed fields', Array.from(keys).every((k) => allowed.indexOf(k) !== -1), keys.size + ' distinct fields');
 
 // 3b. History from the activity log: only known kinds and fields, real timestamps.
-const HISTORY_FIELDS = { status: ['to', 'from'], testing: ['to'], lock_verified: ['date'], lock_amount: ['amount'], email: ['to'], fa_type: ['text'], dvp_status: ['to'], dvp_state: ['to', 'request'] };
+const HISTORY_FIELDS = { status: ['to', 'from'], lock_verified: ['date'], lock_amount: ['amount'], email: ['to'], fa_type: ['text'], dvp_status: ['to'], dvp_state: ['to', 'request'] };
 let events = 0;
 let withHistory = 0;
 let badEvents = 0;

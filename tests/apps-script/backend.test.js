@@ -14,10 +14,10 @@ const SECRET = 'test-secret-0123456789abcdef0123456789abcdef';
 const PROPS = { MONDAY_API_TOKEN: 'test-token-xyz', SITE_URL: 'https://status.example.org', LINK_SECRET: SECRET };
 
 const ALLOWED_FA = ['text_mm4k2vch', 'color_mm4kmej3', 'color_mm4kpp3q', 'date_mm4kw11a', 'date_mm4kpckv',
-  'numeric_mm4k6919', 'color_mm6be9ge', 'long_text_mm4kq322', 'link_mm4kmq24', 'link_mm6hfp5g', 'color_mm6eay19', 'color_mm8z4ket', 'color_mm8a49an'];
+  'numeric_mm4k6919', 'long_text_mm4kq322', 'link_mm4kmq24', 'link_mm6hfp5g', 'color_mm6eay19', 'color_mm8z4ket', 'color_mm8a49an'];
 const EMAIL_COLUMNS = ['email_mm4ke170', 'text_mm4kvrar'];
 const ALLOWED_DVP = ['date_mm8dsx4y', 'date_mm8dm7a0', 'link_mm8rp25j', 'color_mm8dhgvr'];
-const APP_KEYS = ['id', 'name', 'institution', 'type', 'faType', 'dvpStatus', 'submitted', 'state', 'lock', 'testing', 'partyId',
+const APP_KEYS = ['id', 'name', 'institution', 'type', 'faType', 'dvpStatus', 'submitted', 'state', 'lock', 'partyId',
   'website', 'announcement', 'update', 'updated', 'dvp', 'history'];
 const DVP_KEYS = ['id', 'name', 'state', 'submitted', 'finalApproval', 'requestUrl', 'requestRef', 'updated'];
 
@@ -112,7 +112,7 @@ test('emailsOfRow_ reads the Email column and every address in "Emails for Respo
 test('board labels map to state keys; unknown labels fall back and are counted', () => {
   const { env } = setupEnv();
   const fa = {
-    '0-Locked+Needs Review': 'in_review', '1-Needs Review': 'in_review', '1b-FAAC Approved-waiting on tokenomics': 'with_tokenomics',
+    '0-Locked+Needs Review': 'in_review', '1-Needs Review': 'in_review', '1b-FAAC Approved-waiting on tokenomics': 'in_review',
     '2-Approved': 'approved', '2b-Provisional': 'provisional', '3-CIP-0116-paused': 'on_hold', '4-No': 'not_approved', '5-Revoked': 'revoked',
     '6-Withdrawn': 'withdrawn', '7-Closed-new-process': 'closed_process'
   };
@@ -122,10 +122,6 @@ test('board labels map to state keys; unknown labels fall back and are counted',
   assert.equal(env.call('faState_', 'Brand New', stats), 'in_review');
   assert.equal(stats.unknownLabels.fa['Brand New'], 1);
   assert.equal(env.call('faState_', 'toString', stats), 'in_review', 'no prototype lookups');
-
-  assert.equal(env.call('testingState_', 'Sent Email'), 'action_needed');
-  assert.equal(env.call('testingState_', 'Done'), 'complete');
-  assert.equal(env.call('testingState_', null), 'not_started');
 
   assert.equal(env.call('dvpState_', 'Tokenomics Apporval'), 'approved');
   assert.equal(env.call('dvpState_', 'Tokenomics Approval'), 'approved');
@@ -227,7 +223,7 @@ test('the answer holds only allow-listed fields, links are https-only, approval-
 
   assert.deepEqual(swap, {
     id: '101', name: 'Harbor Swap', institution: 'Harbor Labs', type: 'Non-Issuer', faType: 'Basic Featured App', dvpStatus: 'faac_approved', submitted: '2026-09-01',
-    state: 'with_tokenomics', lock: { verified: '2026-09-10', amountMillions: 1.5, confirmed: false }, testing: 'complete',
+    state: 'in_review', lock: { verified: '2026-09-10', amountMillions: 1.5, confirmed: false },
     partyId: 'harbor::1220abcd', website: 'https://harbor.example', announcement: null,
     update: { kind: 'office_hours', date: '2026-11-12' }, updated: '2026-10-20',
     dvp: [{ id: '9003', name: 'Harbor Swap (Aug request)', state: 'with_tokenomics', submitted: '2026-08-20', finalApproval: null, requestUrl: null, requestRef: null, updated: null }],
@@ -386,8 +382,8 @@ test('public board: every application, by status then newest first, with only th
     { name: 'Harbor Vault', type: 'Featured Asset-Moving App', status: 'featured', since: '2026-11-13', sinceExact: true, partyIds: [PID_A], record: 'https://lists.example/vault' },
     { name: 'Lumen Wallet', type: null, status: 'featured', since: '2026-07-07', sinceExact: false, partyIds: [PID_B, PID_C], record: null },
     { name: 'Tidepool DEX', type: 'Basic Featured App', status: 'provisional', since: '2026-11-14', sinceExact: true, partyIds: [], record: 'https://lists.example/tidepool' },
-    // Not approved yet: no announcement, although its FA Link is filled in.
-    { name: 'Harbor Swap', type: 'Basic Featured App', status: 'with_tokenomics', since: '2026-10-20', sinceExact: true, partyIds: [], record: null },
+    // "1b-…tokenomics" counts as in review now; not approved yet, so no announcement although its FA Link is filled in.
+    { name: 'Harbor Swap', type: 'Basic Featured App', status: 'in_review', since: '2026-10-20', sinceExact: true, partyIds: [], record: null },
     Object.assign({ name: 'Lumen Pay', type: null, status: 'in_review' }, imported), // an unknown label counts as in review
     Object.assign({ name: 'No Contact App', type: null, status: 'in_review' }, imported),
     Object.assign({ name: 'Quillpoint Vaults', type: null, status: 'in_review' }, imported),
@@ -455,7 +451,7 @@ test('public list: cached in chunks with the shards; a missing chunk is rebuilt 
 // History (activity log, read per link)
 // ---------------------------------------------------------------------------
 
-const HISTORY_FA_COLUMNS = ['color_mm4kmej3', 'color_mm6be9ge', 'date_mm4kpckv', 'numeric_mm4k6919', 'color_mm6eay19', 'color_mm8z4ket', 'color_mm8a49an'];
+const HISTORY_FA_COLUMNS = ['color_mm4kmej3', 'date_mm4kpckv', 'numeric_mm4k6919', 'color_mm6eay19', 'color_mm8z4ket', 'color_mm8a49an'];
 
 /** The fixture plus activity-log entries for Harbor Swap (101), its DVP request (9003) and Orbit Ledger (103). */
 function historyFixture() {
@@ -505,10 +501,9 @@ test('history: the link\'s own changes, as keys and dates, newest first; nothing
     { at: '2026-11-17T11:26:31Z', kind: 'fa_type', text: 'Featured Asset-Moving App' },
     { at: '2026-11-17T11:26:27Z', kind: 'dvp_status', to: 'in_review' },
     { at: '2026-10-15T10:00:00Z', kind: 'dvp_state', to: 'with_tokenomics', request: '9003' },
-    { at: '2026-10-02T09:00:00Z', kind: 'testing', to: 'complete' },
     { at: '2026-09-10T08:01:00Z', kind: 'lock_amount', amount: 1.5 },
     { at: '2026-09-10T08:00:00Z', kind: 'lock_verified', date: '2026-09-10' }
-  ], 'no-op changes, cleared cells, labels that send nothing, daily lock re-stamps, amount updates and other columns are left out');
+  ], 'no-op changes, cleared cells, labels that send nothing, daily lock re-stamps, amount updates, testing and other columns are left out');
   assert.deepEqual(apps.find((app) => app.id === '102').history, []);
 
   // Only this link's items and the history columns were asked for, never an empty item list.

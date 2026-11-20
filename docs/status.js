@@ -32,7 +32,7 @@
  *
  * Answer shapes (see "Response contract" in DESIGN.md):
  *   GET  { found: true, apps: [{ id, name, institution, type, faType, dvpStatus, submitted, state,
- *                                lock, testing, partyId, website, announcement,
+ *                                lock, partyId, website, announcement,
  *                                update: { kind, date } | null,
  *                                updated, dvp: [{ id, name, state, submitted,
  *                                finalApproval, requestUrl, requestRef, updated }] }] }
@@ -114,7 +114,7 @@
         name: 'Your app',
         meta: 'Your institution',
         pill: 'In committee review',
-        step: 'Step 4 of 6',
+        step: 'Step 3 of 4',
         stepName: 'Featured App Committee review',
         email: 'Latest email from the committee',
         emailTitle: 'Office hours invitation'
@@ -128,14 +128,12 @@
       // Step titles come from fa.steps, so they always match the timeline.
       how: {
         eyebrow: 'How review works',
-        heading: 'Six steps from application to Featured App status',
+        heading: 'Four steps from application to Featured App status',
         intro: "Your status page shows which of these steps are done and which one you're on.",
         steps: [
           { key: 'received', text: 'Your submission is logged with the date it arrived.' },
           { key: 'lock', text: 'We confirm your Canton Coin lock and record the amount locked.' },
-          { key: 'testing', text: 'We test your app. If we need access from you, we email you.' },
-          { key: 'committee', text: 'The committee reviews your application and may invite you to its office hours.' },
-          { key: 'tokenomics', text: 'Once the Featured App Committee approves, the Tokenomics Committee does the final review.' },
+          { key: 'committee', text: 'The Featured App Committee reviews your application, may invite you to its office hours, and decides.' },
           { key: 'granted', text: 'Approval is announced on the tokenomics mailing list, and the app shows as featured on the public Featured App board.' }
         ]
       },
@@ -216,11 +214,10 @@
       columns: { app: 'App', type: 'Featured App type', status: 'Status', record: 'Public record' },
       // One table per status, in this order. `heading` titles the table,
       // `label` and `tone` make the pill, `since` heads the date column.
-      statusOrder: ['featured', 'provisional', 'with_tokenomics', 'in_review', 'received', 'on_hold', 'not_approved', 'revoked', 'withdrawn', 'closed_process'],
+      statusOrder: ['featured', 'provisional', 'in_review', 'received', 'on_hold', 'not_approved', 'revoked', 'withdrawn', 'closed_process'],
       status: {
         featured: { heading: 'Featured', label: 'Featured', tone: 'ok', since: 'Featured since' },
         provisional: { heading: 'Provisionally approved', label: 'Provisional', tone: 'warn', since: 'Provisional since' },
-        with_tokenomics: { heading: 'With Tokenomics Committee', label: 'With Tokenomics', tone: 'info', since: 'Since' },
         in_review: { heading: 'In committee review', label: 'In review', tone: 'info', since: 'In review since' },
         received: { heading: 'Received', label: 'Received', tone: 'info', since: 'Received on' },
         on_hold: { heading: 'On hold (CIP-0116)', label: 'On hold', tone: 'warn', since: 'On hold since' },
@@ -247,7 +244,7 @@
       feed: {
         heading: 'Use this board in your tools',
         text: 'The same board is available as JSON and as a CSV file, for monitoring and automations. It refreshes every 10 minutes.',
-        fields: 'Each application has: name, type, status, since, sinceExact, partyIds and record. status is one of featured, provisional, with_tokenomics, in_review, received, on_hold, not_approved, revoked, withdrawn and closed_process; since is the date the application reached it; record is the announcement, for apps that were approved.',
+        fields: 'Each application has: name, type, status, since, sinceExact, partyIds and record. status is one of featured, provisional, in_review, received, on_hold, not_approved, revoked, withdrawn and closed_process; since is the date the application reached it; record is the announcement, for apps that were approved.',
         copy: 'Copy',
         copyName: 'Copy the JSON feed address'
       },
@@ -294,7 +291,6 @@
       verified: 'Verified',
       confirmed: 'Confirmed',
       notVerified: 'Not verified yet',
-      testing: 'Testing',
       lastUpdated: 'Last updated',
       finalApproval: 'Final approval',
       notYet: 'Not yet'
@@ -321,7 +317,6 @@
         received: 'Application received',
         in_review: 'Moved to committee review',
         in_review_locked: 'Canton Coin lock confirmed',
-        with_tokenomics: 'Approved by the Featured App Committee',
         approved: 'Featured App status granted',
         provisional: 'Provisionally approved',
         on_hold: 'Review paused',
@@ -331,12 +326,6 @@
         closed_process: 'Closed: review process changed'
       },
       statusDetail: 'Status: {status}',
-      testing: {
-        not_started: 'Testing not started',
-        action_needed: 'We emailed you about testing access',
-        in_progress: 'Testing in progress',
-        complete: 'Testing complete'
-      },
       lockVerified: 'Canton Coin lock verified',
       lockAmount: 'Locked amount recorded',
       email: 'The committee emailed you',
@@ -431,12 +420,7 @@
         in_review: {
           label: 'In committee review', tone: 'info',
           message: 'The Featured App Committee is reviewing your application.',
-          next: 'If the committee approves, your application goes to the Tokenomics Committee for the final review.'
-        },
-        with_tokenomics: {
-          label: 'With Tokenomics Committee', tone: 'info',
-          message: 'The Featured App Committee approved your application. The Tokenomics Committee is doing the final review.',
-          next: 'If the Tokenomics Committee approves, your app gets Featured App status, and the approval is announced on the tokenomics mailing list.'
+          next: 'If the committee approves, your app gets Featured App status, and the approval is announced on the tokenomics mailing list.'
         },
         approved: {
           label: 'Approved', tone: 'ok',
@@ -484,9 +468,7 @@
       steps: {
         received: 'Application received',
         lock: 'Canton Coin lock verified',
-        testing: 'Testing',
         committee: 'Featured App Committee review',
-        tokenomics: 'Tokenomics Committee review',
         granted: 'Featured App status granted'
       },
       // Timeline step details (the grey line under a title).
@@ -554,15 +536,6 @@
             text: "The committee found that the app isn't ready for approval yet. You can apply again after three months, or sooner with a substantially changed proposal once it's live on MainNet. Our email has the details."
           }
         }
-      },
-
-      // Testing (from the Testing Process column). Unknown values: in_progress.
-      // `flag` is a pill shown next to the step title.
-      testing: {
-        not_started: { detail: 'Not started' },
-        action_needed: { detail: 'We emailed you about testing access', flag: 'Action needed' },
-        in_progress: { detail: 'In progress' },
-        complete: { detail: 'Complete' }
       }
     },
 
@@ -670,13 +643,13 @@
   // Locked Canton Coin in millions: 1.5 -> "1.5", 2 -> "2".
   const AMOUNT_FORMAT = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 6 });
 
-  // FA states that ended before Featured App status: no testing tile, and a
+  // FA states that ended before Featured App status: no lock tile, and a
   // timeline that stops early (withdrawn and closed right after "Application
   // received"; not approved after the committee's decision).
   const FA_ENDED_EARLY = ['not_approved', 'withdrawn', 'closed_process'];
 
   // FA states where Featured App status was granted (and possibly revoked
-  // later). Their timeline leaves out lock and testing steps with no data.
+  // later). Their timeline leaves out a lock step with no data.
   const FA_GRANTED = ['approved', 'provisional', 'revoked'];
 
   // FA states that hold Featured App status now: they are on the public list.
@@ -686,7 +659,7 @@
   const FEATURED_ROUTE = 'featured';
 
   // FA states still moving through review, for the "in progress" chip on the list.
-  const FA_ACTIVE = ['received', 'in_review', 'with_tokenomics', 'on_hold'];
+  const FA_ACTIVE = ['received', 'in_review', 'on_hold'];
 
   const DAY_MS = 86400000;
 
@@ -853,17 +826,6 @@
   function normalizeState(value, states, fallback) {
     const key = typeof value === 'string' ? value.trim().toLowerCase() : '';
     return hasOwn(states, key) ? key : fallback;
-  }
-
-  /**
-   * The testing key. No value at all means testing hasn't started (the
-   * backend sends "not_started" for an empty column); an unknown value is
-   * shown as in_progress.
-   */
-  function normalizeTesting(value) {
-    const key = typeof value === 'string' ? value.trim().toLowerCase() : '';
-    if (key === '') return 'not_started';
-    return hasOwn(TEXT.fa.testing, key) ? key : 'in_progress';
   }
 
   /** An item's id (application or DVP request) as a string of digits, or "" if it has none. */
@@ -1043,7 +1005,7 @@
     ]);
   }
 
-  /** Title block and status side by side in the band: pill plus "Step 5 of 6 · ...". */
+  /** Title block and status side by side in the band: pill plus "Step 3 of 4 · ...". */
   function heroTitle(head, words, state, steps) {
     const progress = progressText(steps);
     return el('div', { class: 'hero-title' }, [
@@ -1055,7 +1017,7 @@
     ]);
   }
 
-  /** "Step 5 of 6 · Tokenomics Committee review", "All steps complete", or "" once a stop step is reached. */
+  /** "Step 3 of 4 · Featured App Committee review", "All steps complete", or "" once a stop step is reached. */
   function progressText(steps) {
     if (steps.some(function (s) { return s.state === 'stop'; })) return '';
     let open = -1;
@@ -1239,20 +1201,6 @@
     const lock = lockStep(app, granted);
     if (lock) steps.push(lock);
 
-    // Testing.
-    const testing = normalizeTesting(app.testing);
-    const testingWords = TEXT.fa.testing[testing];
-    if (testing === 'complete') {
-      steps.push(step('testing', 'done', titles.testing, testingWords.detail));
-    } else if (testing === 'action_needed') {
-      steps.push(step('testing', 'current', titles.testing, testingWords.detail,
-        { label: testingWords.flag, tone: 'warn' }));
-    } else if (testing === 'in_progress') {
-      steps.push(step('testing', 'current', titles.testing, testingWords.detail));
-    } else if (!granted) {
-      steps.push(step('testing', 'todo', titles.testing, testingWords.detail));
-    }
-
     // Featured App Committee review.
     if (state === 'received') {
       steps.push(step('committee', 'todo', titles.committee, details.notStarted));
@@ -1261,17 +1209,8 @@
     } else if (state === 'on_hold') {
       steps.push(step('committee', 'current', titles.committee, details.paused));
     } else {
-      // with_tokenomics, approved, provisional, revoked: the committee approved it.
+      // approved, provisional, revoked: the committee approved it.
       steps.push(step('committee', 'done', titles.committee, details.approved));
-    }
-
-    // Tokenomics Committee review.
-    if (state === 'with_tokenomics') {
-      steps.push(step('tokenomics', 'current', titles.tokenomics, details.inProgress));
-    } else if (granted) {
-      steps.push(step('tokenomics', 'done', titles.tokenomics, details.approved));
-    } else {
-      steps.push(step('tokenomics', 'todo', titles.tokenomics, details.notStarted));
     }
 
     // Featured App status granted (announced on the tokenomics mailing list),
@@ -1465,7 +1404,7 @@
       el('p', { class: 'example-name', text: x.name }),
       el('p', { class: 'example-meta', text: x.meta }),
       pill(x.pill, 'info'),
-      progressBar(['done', 'done', 'done', 'current', 'todo', 'todo']),
+      progressBar(['done', 'done', 'current', 'todo']),
       el('p', { class: 'example-step' }, [el('strong', { text: x.step }), TEXT.separator + x.stepName]),
       el('div', { class: 'example-email' }, [
         icon('mail'),
@@ -1498,7 +1437,7 @@
       })));
   }
 
-  /** "How review works": the six timeline steps, explained. */
+  /** "How review works": the timeline steps, explained. */
   function howSection() {
     const how = TEXT.about.how;
     return el('section', { class: 'wrap info-section', 'data-section': 'how' }, [
@@ -1675,7 +1614,7 @@
     ]);
   }
 
-  /** The application's number tiles: submitted, Canton Coin locked, testing, last updated. */
+  /** The application's number tiles: submitted, Canton Coin locked, last updated. */
   function faTiles(app, state) {
     const t = TEXT.tiles;
     const ended = FA_ENDED_EARLY.indexOf(state) !== -1;
@@ -1694,13 +1633,6 @@
       tiles.push({ label: t.locked, value: t.confirmed, sub: '' });
     } else if (!ended && !granted) {
       tiles.push({ label: t.locked, value: t.notVerified, sub: '' });
-    }
-
-    // Testing, while the application is still in review (as on the timeline).
-    const testing = normalizeTesting(app.testing);
-    if (!ended && !(granted && testing === 'not_started')) {
-      const testingWords = TEXT.fa.testing[testing];
-      tiles.push({ label: t.testing, value: testingWords.flag || testingWords.detail, sub: testingWords.flag ? testingWords.detail : '' });
     }
 
     tiles.push(dateTile(t.lastUpdated, app.updated));
@@ -1819,8 +1751,6 @@
         const state = to === 'in_review_locked' ? 'in_review' : to;
         const label = hasOwn(TEXT.fa.states, state) ? TEXT.fa.states[state].label : '';
         entry = { title: h.status[to], detail: label ? fillText(h.statusDetail, { status: label }) : '' };
-      } else if (e.kind === 'testing' && hasOwn(h.testing, to)) {
-        entry = { title: h.testing[to], detail: '' };
       } else if (e.kind === 'lock_verified') {
         entry = { title: h.lockVerified, detail: formatDate(e.date) };
       } else if (e.kind === 'lock_amount' && formatAmount(e.amount)) {

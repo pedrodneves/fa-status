@@ -148,7 +148,6 @@ const FA_COLUMNS = {
   submitted: 'date_mm4kw11a',       // "Time stamp" (date)
   lockVerified: 'date_mm4kpckv',    // Lock Verified (date)
   lockedAmount: 'numeric_mm4k6919', // Locked amount (Million) (numbers)
-  testing: 'color_mm6be9ge',        // Testing Process (status)
   partyId: 'long_text_mm4kq322',    // Party ID for the Featured Application (long text)
   website: 'link_mm4kmq24',         // Product Website (link)
   announcement: 'link_mm6hfp5g',    // "FA Link" (link): shown only once approved
@@ -177,7 +176,7 @@ const DVP_COLUMNS = {
  * activity log, read when a link is opened). A subset of the allow-list.
  */
 const FA_HISTORY_COLUMNS = [
-  FA_COLUMNS.status, FA_COLUMNS.testing, FA_COLUMNS.lockVerified, FA_COLUMNS.lockedAmount,
+  FA_COLUMNS.status, FA_COLUMNS.lockVerified, FA_COLUMNS.lockedAmount,
   FA_COLUMNS.sendEmail, FA_COLUMNS.faType, FA_COLUMNS.dvpStatus
 ];
 const DVP_HISTORY_COLUMNS = [DVP_COLUMNS.status];
@@ -258,7 +257,9 @@ const LINK_EMAIL = {
 const FA_STATE_BY_LABEL = {
   '0-Locked+Needs Review': 'in_review',
   '1-Needs Review': 'in_review',
-  '1b-FAAC Approved-waiting on tokenomics': 'with_tokenomics',
+  // The Tokenomics Committee step was dropped (20 Nov 2026): the Featured App
+  // Committee decides. An app still carrying this label is in review.
+  '1b-FAAC Approved-waiting on tokenomics': 'in_review',
   '2-Approved': 'approved',
   // Featured App status with conditions. Not on the board yet: this is the
   // label proposed to the committee. It takes effect if they add it.
@@ -280,7 +281,6 @@ const FA_STATE_UNKNOWN = 'in_review';
 const PUBLIC_STATUS_BY_STATE = {
   approved: 'featured',
   provisional: 'provisional',
-  with_tokenomics: 'with_tokenomics',
   in_review: 'in_review',
   received: 'received',
   on_hold: 'on_hold',
@@ -309,16 +309,6 @@ const FA_LOCKED_LABELS = ['0-Locked+Needs Review'];
 const FA_HISTORY_STATUS_BY_LABEL = Object.assign({}, FA_STATE_BY_LABEL, {
   '0-Locked+Needs Review': 'in_review_locked'
 });
-
-/** Testing Process label -> state. Empty: not_started. Unknown: in_progress (logged). */
-const TESTING_STATE_BY_LABEL = {
-  'Sent Email': 'action_needed',
-  'Pending Review': 'in_progress',
-  'Stuck': 'in_progress',
-  'Done': 'complete'
-};
-const TESTING_STATE_EMPTY = 'not_started';
-const TESTING_STATE_UNKNOWN = 'in_progress';
 
 /** DVP Status label -> state. The board's label really is spelled "Apporval"; both spellings work. */
 const DVP_STATE_BY_LABEL = {
@@ -1658,18 +1648,6 @@ function faState_(label, stats) {
 }
 
 /**
- * Testing Process label -> testing key. Empty: 'not_started'. Unknown:
- * 'in_progress', counted.
- *
- * @param {?string} label The label (null when empty).
- * @param {Object=} stats Run stats, for unknown-label counting.
- * @return {string} The testing key.
- */
-function testingState_(label, stats) {
-  return stateFor_(label, TESTING_STATE_BY_LABEL, TESTING_STATE_EMPTY, TESTING_STATE_UNKNOWN, stats, 'testing');
-}
-
-/**
  * DVP Status label -> state key. Empty or unknown: 'in_review'; unknown labels
  * are counted.
  *
@@ -1689,7 +1667,7 @@ function dvpState_(label, stats) {
  * @param {string} emptyState State for an empty label.
  * @param {string} unknownState State for a label not in the map.
  * @param {Object=} stats Run stats (optional).
- * @param {string} bucket 'fa', 'testing' or 'dvp' in stats.unknownLabels.
+ * @param {string} bucket 'fa' or 'dvp' in stats.unknownLabels.
  * @return {string} The state key.
  */
 function stateFor_(label, map, emptyState, unknownState, stats, bucket) {
@@ -1709,7 +1687,7 @@ function stateFor_(label, map, emptyState, unknownState, stats, bucket) {
  * allow-list: only these fields ever leave Apps Script.
  *
  *   id, name, institution, type, faType, dvpStatus, submitted, state,
- *   lock {verified, amountMillions, confirmed}, testing, partyId,
+ *   lock {verified, amountMillions, confirmed}, partyId,
  *   website, announcement, update {kind, date}, updated, dvp[]
  *
  * Texts are capped and empty ones become null. Links are https-only,
@@ -1717,8 +1695,8 @@ function stateFor_(label, map, emptyState, unknownState, stats, bucket) {
  * (ANNOUNCED_STATES: approved, provisional, revoked). amountMillions is
  * only set when above 0. lock.confirmed is true when the FA Status says the
  * lock is in place (FA_LOCKED_LABELS). doGet adds history (see 8b). updated
- * is the latest change among FA Status,
- * Testing Process, Lock Verified and FA Link. dvp is newest first.
+ * is the latest change among FA Status, Lock Verified and FA Link. dvp is
+ * newest first.
  *
  * @param {Object} row Raw FA item {id, name, column_values}.
  * @param {Array<Object>=} dvpRows Raw DVP items matched to this app.
@@ -1748,14 +1726,12 @@ function toApplicantView(row, dvpRows, stats) {
       // The FA Status says the lock is in place, even if Lock Verified has no date yet.
       confirmed: FA_LOCKED_LABELS.indexOf(statusText_(cols[FA_COLUMNS.status])) !== -1
     },
-    testing: testingState_(statusText_(cols[FA_COLUMNS.testing]), stats),
     partyId: capText_(longTextOf_(cols[FA_COLUMNS.partyId]), PARTY_ID_MAX),
     website: httpsUrl_(linkOf_(cols[FA_COLUMNS.website]).url),
     announcement: ANNOUNCED_STATES.indexOf(state) !== -1 ? httpsUrl_(linkOf_(cols[FA_COLUMNS.announcement]).url) : null,
     update: emailUpdate_(cols[FA_COLUMNS.sendEmail], stats),
     updated: latestChangeDate_([
       cols[FA_COLUMNS.status],
-      cols[FA_COLUMNS.testing],
       cols[FA_COLUMNS.lockVerified],
       cols[FA_COLUMNS.announcement]
     ]),
@@ -2057,7 +2033,6 @@ function readActivityLogs_(cfg, boardId, itemIds, columnIds) {
  * One FA log entry as a history event for an app in `allowed`.
  *
  *   status        {at, kind, to, from}  history step keys (FA_HISTORY_STATUS_BY_LABEL)
- *   testing       {at, kind, to}        testing state keys
  *   lock_verified {at, kind, date}      Lock Verified set from an empty cell (not the daily re-stamps)
  *   lock_amount   {at, kind, amount}    Locked amount (Million) first set above 0 (from empty or 0)
  *   email         {at, kind, to}        the committee email kind (EMAIL_UPDATE_BY_LABEL)
@@ -2081,12 +2056,6 @@ function faHistoryEvent_(log, allowed) {
       const to = historyKey_(logLabel_(entry.value), FA_HISTORY_STATUS_BY_LABEL, FA_STATE_UNKNOWN);
       const from = historyKey_(logLabel_(entry.previous), FA_HISTORY_STATUS_BY_LABEL, FA_STATE_UNKNOWN);
       if (to && to !== from) event = { at: at, kind: 'status', to: to, from: from };
-      break;
-    }
-    case FA_COLUMNS.testing: {
-      const to = historyKey_(logLabel_(entry.value), TESTING_STATE_BY_LABEL, TESTING_STATE_UNKNOWN);
-      const from = historyKey_(logLabel_(entry.previous), TESTING_STATE_BY_LABEL, TESTING_STATE_UNKNOWN);
-      if (to && to !== from) event = { at: at, kind: 'testing', to: to };
       break;
     }
     case FA_COLUMNS.lockVerified: {
@@ -2417,7 +2386,7 @@ function newStats_(mode) {
     partyIdUnreadable: 0, // of those listed, apps whose Party ID cell holds no well-formed ID
     cacheLargestShard: 0, // bytes
     ms: 0,
-    unknownLabels: { fa: {}, testing: {}, dvp: {}, dvpStatus: {}, email: {} }
+    unknownLabels: { fa: {}, dvp: {}, dvpStatus: {}, email: {} }
   };
 }
 
@@ -2435,7 +2404,6 @@ function logRun_(stats, errorKind) {
   });
   line.unknownLabels = {
     fa: countsOnly_(stats.unknownLabels.fa),
-    testing: countsOnly_(stats.unknownLabels.testing),
     dvp: countsOnly_(stats.unknownLabels.dvp),
     dvpStatus: countsOnly_(stats.unknownLabels.dvpStatus),
     email: countsOnly_(stats.unknownLabels.email)
@@ -2468,7 +2436,7 @@ function countsOnly_(map) {
  * data, so they may be logged (capped at LOG_LABEL_MAX characters).
  *
  * @param {Object=} stats Run stats (nothing happens without them).
- * @param {string} bucket 'fa', 'testing', 'dvp', 'dvpStatus' or 'email'.
+ * @param {string} bucket 'fa', 'dvp', 'dvpStatus' or 'email'.
  * @param {string} label The unknown label.
  */
 function noteUnknownLabel_(stats, bucket, label) {

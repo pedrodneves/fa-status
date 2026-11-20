@@ -16,7 +16,7 @@ const CORS = { 'access-control-allow-origin': '*' };
 function app(over) {
   return Object.assign({
     id: '101', name: 'Harbor Swap', institution: 'Fernway Labs', type: 'Non-Issuer', submitted: '2026-10-14',
-    state: 'with_tokenomics', lock: { verified: '2026-10-18', amountMillions: 1.5 }, testing: 'complete',
+    state: 'in_review', lock: { verified: '2026-10-18', amountMillions: 1.5 },
     partyId: 'harborswap-1::1220a9c4d0e3f1b2c3d4e5f60718293a4b5c6d7e8f9012345678abcdef90b81e',
     website: 'https://harborswap.example', announcement: null, updated: '2026-11-03',
     dvp: [{ id: '13557857392', name: 'Harbor Swap (RFQ settlement)', state: 'in_review', submitted: '2026-10-20', finalApproval: null,
@@ -231,14 +231,14 @@ test('unknown ids in the URL fall back to the application, then to the list', as
 
 // ------------------------------------------------------------------ the application page
 
-test('with_tokenomics page: pill, timeline, on file, DVP list, private-link badge, title', async ({ page }, testInfo) => {
+test('in review page: pill, four-step timeline, on file, DVP list, private-link badge, title', async ({ page }, testInfo) => {
   await mockApi(page, one());
   await page.goto('/#' + TOKEN);
-  await expect(pill(page)).toHaveText('With Tokenomics Committee');
-  await expect(pill(page)).toHaveAttribute('data-state', 'with_tokenomics');
+  await expect(pill(page)).toHaveText('In committee review');
+  await expect(pill(page)).toHaveAttribute('data-state', 'in_review');
   await expect(page.locator('.status-box')).toContainText('Last updated 3 Nov 2026');
-  await expect(page.locator('[data-step-state]')).toHaveCount(6);
-  await expect(page.locator('[data-step-state="current"]')).toContainText('Tokenomics Committee review');
+  await expect(page.locator('[data-step]')).toHaveText([/Application received/, /Canton Coin lock verified/, /Featured App Committee review/, /Featured App status granted/]);
+  await expect(page.locator('[data-step-state="current"]')).toContainText('Featured App Committee review');
   await expect(page.locator('.tl')).toContainText('1.5M CC locked');
   await expect(page.locator('[data-field="party-id"]')).toContainText('harborswap-1::');
   await expect(page.locator('[data-field="website"] a')).toHaveAttribute('href', 'https://harborswap.example/');
@@ -247,11 +247,21 @@ test('with_tokenomics page: pill, timeline, on file, DVP list, private-link badg
   await expect(page.locator('[data-private-link]')).toBeVisible();
   await expect(page).toHaveTitle('Harbor Swap · Featured App Status');
   await expect(page.locator('main h1')).toBeFocused();
-  await shot(page, 'app-with-tokenomics', testInfo);
+  await shot(page, 'app-in-review', testInfo);
+});
+
+test('no Tokenomics step or testing: an older answer with them shows as committee review, without testing', async ({ page }) => {
+  await mockApi(page, one({ state: 'with_tokenomics', testing: 'action_needed' }));
+  await page.goto('/#' + TOKEN);
+  await expect(pill(page)).toHaveText('In committee review');
+  await expect(page.locator('[data-step]')).toHaveCount(4);
+  await expect(page.locator('.tl')).not.toContainText('Tokenomics');
+  await expect(page.locator('.tl')).not.toContainText('Testing');
+  await expect(page.locator('.tile')).not.toContainText(['Testing']);
 });
 
 const STATES = [
-  ['received', 'Received'], ['in_review', 'In committee review'], ['with_tokenomics', 'With Tokenomics Committee'],
+  ['received', 'Received'], ['in_review', 'In committee review'],
   ['approved', 'Approved'], ['provisional', 'Provisionally approved'], ['on_hold', 'On hold'], ['not_approved', 'Not approved'],
   ['revoked', 'Featured status revoked'], ['withdrawn', 'Withdrawn'], ['closed_process', 'Closed: process changed']
 ];
@@ -279,7 +289,7 @@ test('approved: announcement link (https only); closed: reapply link; not approv
   await mockApi(page, (route) => route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify(body) }));
   await page.goto('/#' + TOKEN);
   await expect(page.locator('.status-box a')).toHaveText(/View the public announcement/);
-  await expect(page.locator('[data-step-state="done"]')).toHaveCount(6);
+  await expect(page.locator('[data-step-state="done"]')).toHaveCount(4);
   await shot(page, 'app-approved', testInfo);
 
   body = one({ state: 'approved', announcement: 'javascript:alert(1)' });
@@ -570,13 +580,6 @@ test('FA type under "On file"; DVP status at the top of the DVP section, even wi
   await expect(page.locator('[data-section="dvp"]')).toHaveCount(0);
 });
 
-test('testing action_needed shows "Action needed"', async ({ page }) => {
-  await mockApi(page, one({ state: 'in_review', testing: 'action_needed', lock: { verified: null, amountMillions: null }, dvp: [] }));
-  await page.goto('/#' + TOKEN);
-  await expect(page.locator('.tl')).toContainText('Action needed');
-  await expect(page.locator('.tl')).toContainText('We emailed you about testing access');
-});
-
 test('DVP page: reference, public record, back link, no refetch', async ({ page }, testInfo) => {
   const requests = await mockApi(page, one());
   await page.goto('/#' + TOKEN);
@@ -595,10 +598,14 @@ test('DVP page: reference, public record, back link, no refetch', async ({ page 
 test('start page: how review works, every status, the FAQ, and the footer links', async ({ page }) => {
   await mockApi(page, { found: false });
   await page.goto('/');
-  await expect(page.locator('[data-section="how"] li')).toHaveCount(6);
-  await expect(page.locator('[data-section="how"] li').nth(4)).toContainText('Tokenomics Committee review');
-  await expect(page.locator('[data-section="how"] li').nth(5)).toContainText('the public Featured App board');
-  await expect(page.locator('[data-section="statuses"] .pill')).toHaveCount(10);
+  await expect(page.locator('[data-section="how"] h2')).toHaveText('Four steps from application to Featured App status');
+  await expect(page.locator('[data-section="how"] li')).toHaveCount(4);
+  await expect(page.locator('[data-section="how"] li').nth(2)).toContainText('Featured App Committee review');
+  await expect(page.locator('[data-section="how"] li').nth(3)).toContainText('the public Featured App board');
+  await expect(page.locator('[data-section="how"]')).not.toContainText('Testing');
+  await expect(page.locator('[data-section="how"]')).not.toContainText('Tokenomics Committee');
+  await expect(page.locator('[data-section="statuses"] .pill')).toHaveCount(9);
+  await expect(page.locator('[data-section="statuses"]')).not.toContainText('With Tokenomics Committee');
   await expect(page.locator('[data-section="statuses"]')).toContainText('Provisionally approved');
   await expect(page.locator('[data-section="faq"] details')).toHaveCount(7);
   await expect(page.locator('[data-section="faq"]')).toContainText('Is anything about my application public?');
@@ -615,15 +622,14 @@ test('application page: number tiles, "what happens next", activity newest first
   await page.clock.setFixedTime(new Date('2026-11-17T12:00:00Z'));
   await mockApi(page, one({ update: { kind: 'office_hours', date: '2026-11-16' } }));
   await page.goto('/#' + TOKEN);
-  await expect(page.locator('.hero-progress')).toHaveText('Step 5 of 6 · Tokenomics Committee review');
+  await expect(page.locator('.hero-progress')).toHaveText('Step 3 of 4 · Featured App Committee review');
   const tiles = page.locator('.tile');
-  await expect(tiles).toHaveCount(4);
+  await expect(tiles).toHaveCount(3);
   await expect(tiles.nth(0)).toContainText('34 days ago');
   await expect(tiles.nth(0)).toContainText('14 Oct 2026');
   await expect(tiles.nth(1)).toContainText('1.5M CC');
-  await expect(tiles.nth(2)).toContainText('Complete');
-  await expect(tiles.nth(3)).toContainText('14 days ago');
-  await expect(page.locator('.status-box .next')).toContainText('If the Tokenomics Committee approves');
+  await expect(tiles.nth(2)).toContainText('14 days ago');
+  await expect(page.locator('.status-box .next')).toContainText('If the committee approves, your app gets Featured App status');
   const events = page.locator('[data-section="activity"] li');
   await expect(events).toHaveCount(5);
   await expect(events.first()).toContainText('16 Nov 2026');
@@ -632,8 +638,8 @@ test('application page: number tiles, "what happens next", activity newest first
   await expect(page.locator('[data-section="help"] a')).toHaveAttribute('href', 'mailto:ops@canton.foundation');
 });
 
-test('ended applications: no testing tile, no "what happens next", no progress line', async ({ page }) => {
-  await mockApi(page, one({ state: 'withdrawn', lock: { verified: null, amountMillions: null }, testing: 'not_started', dvp: [] }));
+test('ended applications: no lock tile, no "what happens next", no progress line', async ({ page }) => {
+  await mockApi(page, one({ state: 'withdrawn', lock: { verified: null, amountMillions: null }, dvp: [] }));
   await page.goto('/#' + TOKEN);
   await expect(pill(page)).toHaveText('Withdrawn');
   await expect(page.locator('.tile')).toHaveCount(2);
@@ -656,10 +662,10 @@ test('list: count chips and the progress of each application', async ({ page }) 
   await mockApi(page, three());
   await page.goto('/#' + TOKEN);
   await expect(page.locator('.chip')).toHaveText(['3 applications', '1 in progress', '1 approved', '1 ended', '1 DVP request']);
-  await expect(page.locator('a.app[data-app-id="101"] .app-step')).toHaveText('Step 5 of 6 · Tokenomics Committee review');
+  await expect(page.locator('a.app[data-app-id="101"] .app-step')).toHaveText('Step 3 of 4 · Featured App Committee review');
   await expect(page.locator('a.app[data-app-id="103"] .app-step')).toHaveText('All steps complete');
   await expect(page.locator('a.app[data-app-id="99"] .app-step')).toHaveCount(0);
-  await expect(page.locator('a.app[data-app-id="101"] .seg')).toHaveCount(6);
+  await expect(page.locator('a.app[data-app-id="101"] .seg')).toHaveCount(4);
 });
 
 test('DVP page: tiles with the final approval, and a card back to the application', async ({ page }) => {
@@ -667,7 +673,7 @@ test('DVP page: tiles with the final approval, and a card back to the applicatio
   await page.goto('/#' + TOKEN + '/dvp-13557857392');
   await expect(page.locator('.tile').nth(1)).toContainText('Not yet');
   await expect(page.locator('[data-section="for-app"] a.app')).toHaveAttribute('href', '#' + TOKEN);
-  await expect(page.locator('[data-section="for-app"] .pill')).toHaveText('With Tokenomics Committee');
+  await expect(page.locator('[data-section="for-app"] .pill')).toHaveText('In committee review');
 });
 
 test('history: every change from the activity log, newest first, older ones folded; lock confirmed by status', async ({ page }) => {
@@ -698,14 +704,15 @@ test('history: every change from the activity log, newest first, older ones fold
   await expect(visible.first().locator('time')).toHaveAttribute('datetime', '2026-11-17T12:35:07Z');
   await expect(visible.nth(1)).toContainText('Information for Traffic-Based App Rewards');
   await expect(visible.nth(4)).toContainText('Harbor Swap (RFQ settlement) · With Tokenomics Committee');
-  // 7 valid log entries + the submission + the DVP submission = 9; 6 shown, 3 folded.
+  // 6 valid log entries (testing ones are ignored) + the submission + the DVP submission = 8; 6 shown, 2 folded.
   const more = card.locator('details.history-more');
-  await expect(more.locator('summary')).toHaveText('Show 3 earlier changes');
+  await expect(more.locator('summary')).toHaveText('Show 2 earlier changes');
   await more.locator('summary').click();
-  await expect(more.locator('li')).toHaveCount(3);
+  await expect(more.locator('li')).toHaveCount(2);
   await expect(more.locator('li').first()).toContainText('Application submitted');
   await expect(more.locator('li').last()).toContainText('Locked amount recorded');
   await expect(card).not.toContainText('something_new');
+  await expect(card).not.toContainText('Testing');
 });
 
 test('history on the DVP page: the request\'s own status changes', async ({ page }) => {

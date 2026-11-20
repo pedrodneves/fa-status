@@ -113,7 +113,7 @@ test('board labels map to state keys; unknown labels fall back and are counted',
   const { env } = setupEnv();
   const fa = {
     '0-Locked+Needs Review': 'in_review', '1-Needs Review': 'in_review', '1b-FAAC Approved-waiting on tokenomics': 'with_tokenomics',
-    '2-Approved': 'approved', '3-CIP-0116-paused': 'on_hold', '4-No': 'not_approved', '5-Revoked': 'revoked',
+    '2-Approved': 'approved', '2b-Provisional': 'provisional', '3-CIP-0116-paused': 'on_hold', '4-No': 'not_approved', '5-Revoked': 'revoked',
     '6-Withdrawn': 'withdrawn', '7-Closed-new-process': 'closed_process'
   };
   Object.keys(fa).forEach((label) => assert.equal(env.call('faState_', label), fa[label], label));
@@ -301,6 +301,144 @@ test('reads every page of a large board', () => {
   assert.equal(stats.faRows, 1203);
   assert.equal(env.requests.filter((r) => /next_items_page/.test(r.payload.query)).length, 2);
   assert.equal(appsOf(env, 'u1202@many.example')[0].name, 'App 1202');
+});
+
+// ---------------------------------------------------------------------------
+// The public list (GET ?view=featured)
+// ---------------------------------------------------------------------------
+
+const PID_A = 'harborvault-1::1220' + 'a'.repeat(64);
+const PID_B = 'lumen_wallet::1220' + '0123456789abcdef'.repeat(4);
+const PID_C = 'lumen-ops::1220' + 'f'.repeat(64);
+const PID_D = 'copper-bridge::1220' + '9'.repeat(64);
+const PUBLIC_KEYS = ['name', 'type', 'status', 'since', 'sinceExact', 'partyIds', 'record'];
+
+/** The fixture with Party IDs, FA Types, a provisional and a revoked app, for the public list. */
+function publicFixture() {
+  const data = fixture();
+  data.fa[1] = faItem({
+    id: 102, name: 'Harbor Vault', institution: 'Harbor Labs', email: 'alice@harbor.example', status: '2-Approved',
+    statusChangedAt: '2026-11-13T15:00:00Z', faType: 'Featured Asset-Moving App', partyId: '  ' + PID_A + '\n',
+    submitted: '2026-10-01', announcement: 'https://lists.example/vault', website: 'javascript:alert(1)'
+  });
+  data.fa[4] = faItem({
+    id: 105, name: 'Lumen Wallet', institution: 'Lumen Labs', responsible: 'ops@lumen.example and cto@lumen.example',
+    status: '2-Approved', createdAt: '2026-07-07T09:12:00Z', partyId: PID_B + ', ' + PID_C + ', ' + PID_B,
+    announcement: 'http://insecure.example/announce'
+  });
+  data.fa.push(faItem({
+    id: 108, name: 'Tidepool DEX', institution: 'Larkspur Labs', email: 'team@tidepool.example', status: '2b-Provisional',
+    statusChangedAt: '2026-11-14T16:40:00Z', faType: 'Basic Featured App', partyId: 'see our docs', announcement: 'https://lists.example/tidepool'
+  }));
+  data.fa.push(faItem({
+    id: 110, name: 'Copper Bridge', institution: 'Copperfield Labs', email: 'team@copper.example', status: '5-Revoked',
+    statusChangedAt: '2026-11-18T10:00:00Z', faType: 'Featured Asset', partyId: PID_D, announcement: 'https://lists.example/copper'
+  }));
+  return data;
+}
+
+test('partyIdsOf_ finds well-formed Canton party IDs only, in order, without repeats', () => {
+  const { env } = setupEnv();
+  const ids = (text) => Array.from(env.call('partyIdsOf_', text));
+  assert.deepEqual(ids(PID_A), [PID_A]);
+  assert.deepEqual(ids(' ' + PID_B + ',\n' + PID_C + '; ' + PID_B + ' '), [PID_B, PID_C]);
+  assert.deepEqual(ids('a::b::1220' + 'c'.repeat(64)), ['b::1220' + 'c'.repeat(64)], 'a hint never contains "::"');
+  assert.deepEqual(ids('x:y::1220' + 'c'.repeat(64)), ['x:y::1220' + 'c'.repeat(64)], 'a single ":" is fine');
+  const glued = 'dead-beef::1220' + 'c'.repeat(64);
+  assert.deepEqual(ids(PID_A + glued), [PID_A, glued], 'two IDs typed with no separator');
+  assert.deepEqual(ids('Mod-Vault ::1220' + 'd'.repeat(64)), [], 'a space before "::" is not an ID');
+  assert.deepEqual(ids('x::1220' + 'e'.repeat(63)), [], 'too short');
+  assert.deepEqual(ids('x::1220' + 'e'.repeat(65)), [], 'too long');
+  assert.deepEqual(ids('x::1220' + 'e'.repeat(65) + ' y::1220' + 'f'.repeat(64)), ['y::1220' + 'f'.repeat(64)], 'a bad one is skipped, the next kept');
+  assert.deepEqual(ids('x::1220' + 'E'.repeat(64)), [], 'upper-case hex is not how Canton prints it');
+  assert.deepEqual(ids(''), []);
+  assert.deepEqual(ids(null), []);
+  const six = Array.from({ length: 6 }, (_, i) => 'p' + i + '::1220' + String(i).repeat(64)).join(' ');
+  assert.equal(ids(six).length, 5, 'capped');
+});
+
+test('"2b-Provisional" (if the committee adds it) is provisional, and its announcement is sent', () => {
+  const { env } = setupEnv(publicFixture());
+  assert.equal(env.call('faState_', '2b-Provisional'), 'provisional');
+  env.call('refresh');
+  const tidepool = appsOf(env, 'team@tidepool.example')[0];
+  assert.equal(tidepool.state, 'provisional');
+  assert.equal(tidepool.announcement, 'https://lists.example/tidepool');
+  assert.equal(appsOf(env, 'team@copper.example')[0].announcement, 'https://lists.example/copper', 'revoked: on the public list, so its announcement too');
+  assert.equal(appsOf(env, 'dev@orbit.example')[0].announcement, null, 'not approved: no announcement');
+});
+
+test('public list: apps with Featured App status, newest first, then revoked ones, with only the public fields', () => {
+  const { env } = setupEnv(publicFixture());
+  const stats = env.call('refresh');
+  assert.equal(stats.featured, 3);
+  assert.equal(stats.revoked, 1);
+  assert.equal(stats.partyIdUnreadable, 1);
+
+  const out = env.call('doGet', { parameter: { view: 'featured' } });
+  assert.equal(out.getMimeType(), 'application/json');
+  const body = JSON.parse(out.getContent());
+  assert.deepEqual(Object.keys(body), ['updated', 'apps']);
+  assert.match(body.updated, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  body.apps.forEach((app) => assert.deepEqual(Object.keys(app), PUBLIC_KEYS));
+  assert.deepEqual(body.apps, [
+    { name: 'Tidepool DEX', type: 'Basic Featured App', status: 'provisional', since: '2026-11-14', sinceExact: true, partyIds: [], record: 'https://lists.example/tidepool' },
+    { name: 'Harbor Vault', type: 'Featured Asset-Moving App', status: 'featured', since: '2026-11-13', sinceExact: true, partyIds: [PID_A], record: 'https://lists.example/vault' },
+    { name: 'Lumen Wallet', type: null, status: 'featured', since: '2026-07-07', sinceExact: false, partyIds: [PID_B, PID_C], record: null },
+    { name: 'Copper Bridge', type: 'Featured Asset', status: 'revoked', since: '2026-11-18', sinceExact: true, partyIds: [PID_D], record: 'https://lists.example/copper' }
+  ]);
+
+  // Nothing private: no address, institution, sentinel, or anything not on the list.
+  const text = JSON.stringify(body).toLowerCase();
+  ['@', 'harbor labs', 'lumen labs', 'larkspur', 'copperfield', 'orbit', 'quillpoint', 'see our docs', 'sentinel', 'javascript'].forEach((s) => assert.ok(text.indexOf(s) === -1, s));
+});
+
+test('public list as CSV: one line per app, quoted where needed, never a spreadsheet formula', () => {
+  const data = publicFixture();
+  data.fa.push(faItem({ id: 109, name: '=HYPERLINK("https://evil.example","Win, now")', status: '2-Approved', statusChangedAt: '2026-01-02T00:00:00Z' }));
+  const { env } = setupEnv(data);
+  env.call('refresh');
+  const out = env.call('doGet', { parameter: { view: 'featured', format: 'csv' } });
+  assert.equal(out.getMimeType(), 'text/csv');
+  assert.equal(out.getFileName(), 'featured-apps.csv');
+  const lines = out.getContent().split('\r\n');
+  assert.equal(lines[0], 'name,type,status,since,since_exact,party_ids,record');
+  assert.equal(lines[1], 'Tidepool DEX,Basic Featured App,provisional,2026-11-14,true,,https://lists.example/tidepool');
+  assert.equal(lines[3], 'Lumen Wallet,,featured,2026-07-07,false,' + PID_B + ' ' + PID_C + ',');
+  assert.equal(lines[4], '"\'=HYPERLINK(""https://evil.example"",""Win, now"")",,featured,2026-01-02,true,,');
+  assert.equal(lines[5], 'Copper Bridge,Featured Asset,revoked,2026-11-18,true,' + PID_D + ',https://lists.example/copper');
+  assert.equal(lines[6], '', 'ends with a line break');
+  assert.equal(lines.length, 7);
+});
+
+test('public list: cached in chunks with the shards; a missing chunk is rebuilt under the lock', () => {
+  const fa = Array.from({ length: 600 }, (_, i) => faItem({
+    id: 7000 + i, name: 'Featured app number ' + i, status: '2-Approved', statusChangedAt: '2026-10-01T00:00:00Z',
+    partyId: 'app-' + i + '::1220' + 'b'.repeat(64), announcement: 'https://lists.example/' + 'x'.repeat(60) + '/' + i
+  }));
+  const { env, monday } = setupEnv({ fa: fa, dvp: [] });
+  env.call('refresh');
+  assert.equal(env.putAllCalls, 1, 'shards and the public list in one putAll');
+  const index = env.cache.dump()['fa2:pub'];
+  assert.ok(index.chunks >= 2, 'more than one chunk: ' + index.chunks);
+  for (let i = 0; i < index.chunks; i++) {
+    assert.ok(Buffer.byteLength(JSON.stringify(env.cache.dump()['fa2:pub:' + i])) <= 90000);
+    assert.equal(env.cache.ttlOf('fa2:pub:' + i), 21600);
+  }
+  const featured = () => JSON.parse(env.call('doGet', { parameter: { view: 'featured' } }).getContent());
+  assert.equal(featured().apps.length, 600);
+
+  const queries = monday.queries;
+  env.cache.evict('fa2:pub:1');
+  const locks = env.lockAcquisitions;
+  assert.equal(featured().apps.length, 600);
+  assert.ok(monday.queries > queries, 'rebuilt from Monday');
+  assert.equal(env.lockAcquisitions, locks + 1);
+
+  env.lockAvailable = false;
+  env.cache.clear();
+  assert.deepEqual(featured(), { error: 'unavailable' });
+  assert.equal(env.call('doGet', { parameter: { view: 'featured', format: 'csv' } }).getMimeType(), 'application/json', 'errors stay JSON');
 });
 
 // ---------------------------------------------------------------------------

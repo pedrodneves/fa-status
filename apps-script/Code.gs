@@ -26,7 +26,8 @@
  * THREE ENTRY POINTS
  * ------------------
  *   doPost(e)   the page's form: "email me my link"
- *   doGet(e)    the page asks for one token's applications
+ *   doGet(e)    the page asks for one token's applications, or (with
+ *               ?view=featured) for the public list of featured apps
  *   refresh()   every 10 minutes: read both boards, rebuild the cache
  *
  * FLOW 1: REQUESTING A LINK (page form -> doPost)
@@ -56,8 +57,21 @@
  *        the same name (see matchDvpToApps_).
  *     3. Builds, for every email address found on the FA board, the list of
  *        that address's applications (allow-listed fields only).
- *     4. Writes all 64 cache shards in one call (6-hour expiry).
- *     5. Logs ONE JSON line of counts. Never addresses, tokens or names.
+ *     4. Builds the public list: every app with Featured App status, then
+ *        every app whose status was revoked.
+ *     5. Writes all 64 cache shards and the public list in one call (6-hour
+ *        expiry).
+ *     6. Logs ONE JSON line of counts. Never addresses, tokens or names.
+ *
+ * FLOW 4: THE PUBLIC LIST (page or anyone -> doGet ?view=featured)
+ *   Anyone can read it: it is the same for everyone and holds no applicant
+ *   data beyond what is already public once an app is featured.
+ *     a. GET <exec URL>?view=featured answers {updated, apps: [...]}, one
+ *        entry per app with Featured App status or whose status was
+ *        revoked: name, FA Type, status, since, Party IDs and the
+ *        announcement link (toPublicView_).
+ *     b. Adding &format=csv answers the same list as a CSV file.
+ *     c. A cache miss rebuilds from Monday under the lock, as in flow 2.
  *
  * SCRIPT PROPERTIES (Project Settings -> Script Properties)
  * ---------------------------------------------------------
@@ -89,6 +103,11 @@
  *   - Only allow-listed columns (plus the two email columns) are requested
  *     from Monday, and the answer is built field by field in
  *     toApplicantView(), so nothing else can leak.
+ *   - The public list holds only apps with Featured App status or whose
+ *     status was revoked, and only
+ *     their name, FA Type, status, date, Party IDs and announcement link
+ *     (toPublicView_). The institution, the review's progress and everything
+ *     else stay private.
  *   - Email addresses are only used to compute tokens and to send the link to
  *     that same address. They are never cached, logged or returned.
  *   - Logs carry counts, unknown board labels and short error kinds only.
@@ -191,6 +210,9 @@ const HISTORY_TTL_S = 600;            // history is read again at most every 10 
 const HISTORY_PAGE_LIMIT = 100;       // activity log entries per request
 const HISTORY_MAX_PAGES = 5;          // per board and link (500 changes)
 const HISTORY_MAX_PER_APP = 80;       // newest changes kept per application
+const PUBLIC_KEY = CACHE_PREFIX + 'pub'; // the public list's index {updated, chunks}; its rows under PUBLIC_KEY + ':<n>'
+const PUBLIC_CHUNK_MAX_BYTES = 90000; // rows per cache value stay under the 100 KB limit
+const PUBLIC_CHUNKS_MAX = 50;         // an index naming more chunks than this is treated as a cache miss
 
 // Link emails.
 const MAIL_KEY_PREFIX = CACHE_PREFIX + 'mail:'; // + token: when this address was last emailed
@@ -210,8 +232,13 @@ const NAME_MAX = 200;        // app name, DVP request name
 const INSTITUTION_MAX = 200; // institution
 const LABEL_MAX = 200;       // the Type label
 const PARTY_ID_MAX = 2000;   // party id
+const PARTY_IDS_MAX = 5;     // party ids per app on the public list
 const URL_MAX = 2000;        // website, announcement, DVP request link
 const LOG_LABEL_MAX = 60;    // unknown labels as written to the log
+
+// The public list as a CSV file (GET ?view=featured&format=csv).
+const CSV_FILE_NAME = 'featured-apps.csv';
+const CSV_COLUMNS = ['name', 'type', 'status', 'since', 'since_exact', 'party_ids', 'record'];
 
 // -----------------------------------------------------------------------------
 // The email that carries the link (the page's wording lives in docs/status.js)
@@ -236,6 +263,9 @@ const FA_STATE_BY_LABEL = {
   '1-Needs Review': 'in_review',
   '1b-FAAC Approved-waiting on tokenomics': 'with_tokenomics',
   '2-Approved': 'approved',
+  // Featured App status with conditions. Not on the board yet: this is the
+  // label proposed to the committee. It takes effect if they add it.
+  '2b-Provisional': 'provisional',
   '3-CIP-0116-paused': 'on_hold',
   '4-No': 'not_approved',
   '5-Revoked': 'revoked',
@@ -244,6 +274,18 @@ const FA_STATE_BY_LABEL = {
 };
 const FA_STATE_EMPTY = 'received';
 const FA_STATE_UNKNOWN = 'in_review';
+
+/**
+ * FA states on the public list -> their status there: apps with Featured App
+ * status, and apps whose status was revoked (the committee decided on 20 Nov
+ * 2026 to list those too). Only apps in these states are listed publicly,
+ * and only they get their announcement link sent.
+ */
+const PUBLIC_STATUS_BY_STATE = {
+  approved: 'featured',
+  provisional: 'provisional',
+  revoked: 'revoked'
+};
 
 /** FA Status labels that mean the Canton Coin lock is confirmed (lock.confirmed). */
 const FA_LOCKED_LABELS = ['0-Locked+Needs Review'];
@@ -298,7 +340,7 @@ const EMAIL_UPDATE_BY_LABEL = {
   'FA Type Email': 'fa_type_info',          // TBAR: FA type and App Operations PartyIDs
   'Locking Check': 'locking_check',         // the locking party lacks the full balance
   'Updated Process': 'resubmit',            // resubmit with the revised form
-  'Decline': 'declined',                    // not ready; reapply after three months
+  'Decline': 'declined',                    // not ready; reapply after three months, or sooner with a substantially changed proposal live on MainNet
   'Working on it': null,
   'Done': null,
   'Stuck': null
@@ -344,6 +386,18 @@ const DATE_PREFIX_RE = /^(\d{4}-\d{2}-\d{2})(?:$|[ T])/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_DATETIME_RE = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)(?:\.(\d+))?(Z|[+-]\d{2}:?\d{2})?$/i;
 
+/**
+ * A Canton party ID inside the free-text "Party ID" cell: a hint (letters,
+ * digits, "_", "-" and single ":"; never "::"; up to 185 characters), then
+ * "::1220" and the 64 hex digits of the namespace fingerprint, then the end,
+ * a character that isn't hex, or the next party ID (two IDs typed with no
+ * separator). "a::1220…, b::1220…" gives two. Text not in this form (a
+ * space before "::", a fingerprint of the wrong length) gives none, so the
+ * public list never shows a malformed ID.
+ */
+const PARTY_HINT_SRC = '[A-Za-z0-9_-](?:[A-Za-z0-9_-]|:(?!:)){0,184}';
+const PARTY_ID_FIND_RE = new RegExp(PARTY_HINT_SRC + '::1220[0-9a-f]{64}(?=$|[^0-9a-f]|' + PARTY_HINT_SRC + '::1220)', 'g');
+
 /** DVP request reference: "/message/<n>" in the link URL, or a leading "#<n>" in its text. */
 const REQUEST_REF_URL_RE = /\/message\/(\d{1,20})/;
 const REQUEST_REF_TEXT_RE = /^\s*#(\d{1,20})/;
@@ -359,22 +413,30 @@ const LOG_EVENT = 'fa-status';
 // =============================================================================
 
 /**
- * Web app GET: answers one link for the page.
+ * Web app GET: answers one link for the page, or the public list.
  *
  * @param {Object=} e The request event (undefined when run from the editor).
- *     e.parameter.link carries the token.
- * @return {TextOutput} JSON: {found: true, apps: [...]}, {found: false} or
- *     {error: 'unavailable'}.
+ *     e.parameter.link carries the token. e.parameter.view === 'featured'
+ *     asks for the public list instead, as a CSV file with format=csv.
+ * @return {TextOutput} For a link, JSON: {found: true, apps: [...]},
+ *     {found: false} or {error: 'unavailable'}. For the public list, JSON
+ *     {updated, apps: [...]} or {error: 'unavailable'}, or the CSV file.
  */
 function doGet(e) {
+  const params = e && e.parameter ? e.parameter : {};
   let body;
   try {
-    const token = e && e.parameter && typeof e.parameter.link === 'string' ? e.parameter.link : '';
-    // A malformed token can never be in the cache, so answer without touching it.
-    body = TOKEN_RE.test(token) ? lookup_(token) : { found: false };
-    // Each application's history, from Monday's activity log. Optional: if it
-    // can't be read, the answer goes out without it.
-    if (body.found) body = withHistory_(token, body);
+    if (params.view === 'featured') {
+      body = featuredList_();
+      if (params.format === 'csv' && !body.error) return csvOutput_(body);
+    } else {
+      const token = typeof params.link === 'string' ? params.link : '';
+      // A malformed token can never be in the cache, so answer without touching it.
+      body = TOKEN_RE.test(token) ? lookup_(token) : { found: false };
+      // Each application's history, from Monday's activity log. Optional: if it
+      // can't be read, the answer goes out without it.
+      if (body.found) body = withHistory_(token, body);
+    }
   } catch (err) {
     console.error(JSON.stringify({ event: LOG_EVENT, mode: 'doGet', error: errorKind_(err) }));
     body = { error: 'unavailable' };
@@ -470,6 +532,8 @@ function setup() {
     refreshed: Boolean(stats),
     faRows: stats ? stats.faRows : 0,
     addresses: stats ? stats.addresses : 0,
+    featured: stats ? stats.featured : 0,
+    revoked: stats ? stats.revoked : 0,
     dvpMatched: stats ? stats.dvpMatched : 0,
     dvpUnmatched: stats ? stats.dvpUnmatched : 0
   }));
@@ -481,30 +545,56 @@ function setup() {
 // =============================================================================
 
 /**
- * Looks one token up in the cache. On a miss: takes the script lock, reads the
- * shard again (another request may have refilled it), and if it is still
- * missing rebuilds the cache from Monday. Without the lock it reads the shard
- * once more and otherwise gives up.
+ * Looks one token up in the cache, rebuilding it on a miss (see
+ * fromCacheOrRebuild_).
  *
  * @param {string} token A token that already matched TOKEN_RE.
  * @return {Object} {found: true, apps}, {found: false} or {error: 'unavailable'}.
  */
 function lookup_(token) {
-  const shard = readShard_(token);
-  if (shard) return answerFor_(shard, token);
+  return fromCacheOrRebuild_('lookup', () => {
+    const shard = readShard_(token);
+    return shard ? answerFor_(shard, token) : null;
+  }, (result) => answerFor_(result.views, token));
+}
+
+/**
+ * The public list from the cache, rebuilding it on a miss (see
+ * fromCacheOrRebuild_).
+ *
+ * @return {Object} {updated, apps} or {error: 'unavailable'}.
+ */
+function featuredList_() {
+  return fromCacheOrRebuild_('featured', readPublicCache_, (result) => result.featured);
+}
+
+/**
+ * Answers from the cache. On a miss: takes the script lock, reads again
+ * (another request may have refilled the cache), and if it is still missing
+ * rebuilds the cache from Monday. Without the lock it reads once more and
+ * otherwise gives up.
+ *
+ * @param {string} mode 'lookup' or 'featured' (for the log line).
+ * @param {function(): ?Object} read The answer from the cache, or null on a miss.
+ * @param {function(Object): Object} fromRebuild The answer from rebuild_()'s result.
+ * @return {Object} The answer, or {error: 'unavailable'}.
+ */
+function fromCacheOrRebuild_(mode, read, fromRebuild) {
+  const hit = read();
+  if (hit) return hit;
 
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(LOCK_WAIT_MS)) {
-    const again = readShard_(token);
-    if (again) return answerFor_(again, token);
-    console.error(JSON.stringify({ event: LOG_EVENT, mode: 'lookup', error: 'lock_busy' }));
+    const again = read();
+    if (again) return again;
+    console.error(JSON.stringify({ event: LOG_EVENT, mode: mode, error: 'lock_busy' }));
     return { error: 'unavailable' };
   }
   try {
-    const filled = readShard_(token);
-    if (filled) return answerFor_(filled, token);
+    const filled = read();
+    if (filled) return filled;
     const result = rebuild_('rebuild');
-    return result ? answerFor_(result.views, token) : { error: 'unavailable' };
+    return result ? fromRebuild(result) : { error: 'unavailable' };
   } finally {
     lock.releaseLock();
   }
@@ -532,6 +622,41 @@ function answerFor_(map, token) {
  */
 function jsonOutput_(body) {
   return ContentService.createTextOutput(JSON.stringify(body)).setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * The public list as a CSV file: one header line (CSV_COLUMNS), then one
+ * line per app. Several Party IDs are separated by a space (an ID never
+ * contains one).
+ *
+ * @param {{apps: Array<Object>}} list From featuredList_().
+ * @return {TextOutput} The CSV, downloaded as CSV_FILE_NAME.
+ */
+function csvOutput_(list) {
+  const lines = [CSV_COLUMNS.join(',')];
+  list.apps.forEach((app) => {
+    lines.push([
+      app.name, app.type, app.status, app.since, app.sinceExact ? 'true' : 'false',
+      (Array.isArray(app.partyIds) ? app.partyIds : []).join(' '), app.record
+    ].map(csvCell_).join(','));
+  });
+  return ContentService.createTextOutput(lines.join('\r\n') + '\r\n')
+      .setMimeType(ContentService.MimeType.CSV)
+      .downloadAsFile(CSV_FILE_NAME);
+}
+
+/**
+ * One CSV cell: quoted when it holds a comma, quote or line break. A cell
+ * that starts like a spreadsheet formula (=, +, -, @) gets a leading "'",
+ * so opening the file never runs one.
+ *
+ * @param {*} value The value (null and undefined give an empty cell).
+ * @return {string} The cell.
+ */
+function csvCell_(value) {
+  let text = value === null || value === undefined ? '' : String(value);
+  if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
+  return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
 }
 
 // =============================================================================
@@ -987,12 +1112,13 @@ function assertRead_(res) {
  * @param {Object} cfg Config from readConfig_().
  * @param {string} boardId The board to read.
  * @param {Array<string>} columnIds The only column ids to request.
- * @return {Array<Object>} Raw items: {id, name, column_values: [{id, type, text, value}]}.
+ * @return {Array<Object>} Raw items: {id, name, created_at, column_values:
+ *     [{id, type, text, value}]}.
  * @throws {Error} When any page can't be read, the board isn't found, or
  *     after MAX_PAGES pages.
  */
 function readItems_(cfg, boardId, columnIds) {
-  const fields = 'id name column_values(ids: $c) { id type text value }';
+  const fields = 'id name created_at column_values(ids: $c) { id type text value }';
   const firstQuery = 'query ($b: ID!, $c: [String!], $l: Int!) { boards(ids: [$b]) { ' +
       'items_page(limit: $l) { cursor items { ' + fields + ' } } } }';
   const nextQuery = 'query ($cur: String!, $c: [String!], $l: Int!) { ' +
@@ -1048,8 +1174,9 @@ function readColumns_(cfg, boardId, columnIds) {
  * lock (refresh() and lookup_() both do).
  *
  * @param {string} mode 'refresh' or 'rebuild' (for the log line).
- * @return {?{views: Object<string, Object>, stats: Object}} null when the
- *     Script Properties are incomplete.
+ * @return {?{views: Object<string, Object>, featured: Object, stats: Object}}
+ *     views: token -> entry; featured: the public list. null when the Script
+ *     Properties are incomplete.
  * @throws {Error} A data-free Error when Monday or the cache fails.
  */
 function rebuild_(mode) {
@@ -1063,13 +1190,13 @@ function rebuild_(mode) {
   }
   const stats = newStats_(mode);
   try {
-    const views = buildViews_(cfg, stats);
+    const built = buildViews_(cfg, stats);
     stats.stage = 'write_cache';
-    stats.cacheLargestShard = writeCache_(views);
+    stats.cacheLargestShard = writeCache_(built.views, built.featured);
     stats.stage = 'done';
     stats.ms = Date.now() - started;
     logRun_(stats);
-    return { views: views, stats: stats };
+    return { views: built.views, featured: built.featured, stats: stats };
   } catch (err) {
     stats.ms = Date.now() - started;
     const kind = errorKind_(err);
@@ -1080,17 +1207,21 @@ function rebuild_(mode) {
 
 /**
  * Reads Monday and builds token -> {apps: [...]} for every email address on
- * the FA board.
+ * the FA board, and the public list.
  *
  *   1. Read the FA board (allow-listed columns + the two email columns).
  *   2. Read the DVP board and attach each request to its FA app(s) by name.
  *   3. For each FA row: build its view once, then add it to the list of every
  *      address on the row. Rows without an address can't be reached.
+ *      Rows with Featured App status, or whose status was revoked, also go
+ *      on the public list.
  *   4. Sort each list newest first.
  *
  * @param {Object} cfg Config from readConfig_() (already validated).
  * @param {Object} stats Run stats to fill.
- * @return {Object<string, {apps: Array<Object>}>} Token -> entry.
+ * @return {{views: Object<string, {apps: Array<Object>}>,
+ *     featured: {updated: string, apps: Array<Object>}}} Token -> entry, and
+ *     the public list.
  */
 function buildViews_(cfg, stats) {
   stats.stage = 'read_fa';
@@ -1104,7 +1235,11 @@ function buildViews_(cfg, stats) {
   stats.stage = 'build';
   const dvpByApp = matchDvpToApps_(faRows, dvpRows, stats);
   const appsByToken = {};
+  const featured = [];
   faRows.forEach((row) => {
+    const listed = toPublicView_(row, stats);
+    if (listed) featured.push(listed);
+
     const emails = emailsOfRow_(row);
     if (!emails.length) {
       stats.appsWithoutEmail++;
@@ -1124,7 +1259,12 @@ function buildViews_(cfg, stats) {
     views[token] = { apps: appsByToken[token].sort(compareNewestFirst_) };
   });
   stats.addresses = Object.keys(views).length;
-  return views;
+  stats.revoked = featured.filter((app) => app.status === 'revoked').length;
+  stats.featured = featured.length - stats.revoked;
+  return {
+    views: views,
+    featured: { updated: new Date().toISOString().slice(0, 19) + 'Z', apps: featured.sort(comparePublic_) }
+  };
 }
 
 /**
@@ -1563,7 +1703,8 @@ function stateFor_(label, map, emptyState, unknownState, stats, bucket) {
  *   website, announcement, update {kind, date}, updated, dvp[]
  *
  * Texts are capped and empty ones become null. Links are https-only,
- * otherwise null. announcement is only sent once approved. amountMillions is
+ * otherwise null. announcement is only sent once the app is on the public
+ * list (approved, provisional or revoked). amountMillions is
  * only set when above 0. lock.confirmed is true when the FA Status says the
  * lock is in place (FA_LOCKED_LABELS). doGet adds history (see 8b). updated
  * is the latest change among FA Status,
@@ -1600,7 +1741,7 @@ function toApplicantView(row, dvpRows, stats) {
     testing: testingState_(statusText_(cols[FA_COLUMNS.testing]), stats),
     partyId: capText_(longTextOf_(cols[FA_COLUMNS.partyId]), PARTY_ID_MAX),
     website: httpsUrl_(linkOf_(cols[FA_COLUMNS.website]).url),
-    announcement: state === 'approved' ? httpsUrl_(linkOf_(cols[FA_COLUMNS.announcement]).url) : null,
+    announcement: hasOwn_(PUBLIC_STATUS_BY_STATE, state) ? httpsUrl_(linkOf_(cols[FA_COLUMNS.announcement]).url) : null,
     update: emailUpdate_(cols[FA_COLUMNS.sendEmail], stats),
     updated: latestChangeDate_([
       cols[FA_COLUMNS.status],
@@ -1696,6 +1837,87 @@ function compareNewestFirst_(a, b) {
   if (x.length !== y.length) return y.length - x.length; // numeric ids: longer is larger
   if (x === y) return 0;
   return x < y ? 1 : -1;
+}
+
+// -----------------------------------------------------------------------------
+// The public list (the allow-list for everyone, field by field)
+// -----------------------------------------------------------------------------
+
+/**
+ * One entry of the public list from a raw FA item, or null when the app
+ * isn't listed (PUBLIC_STATUS_BY_STATE). Only these fields are ever made
+ * public:
+ *
+ *   name        the item name
+ *   type        the FA Type label (null when not set yet)
+ *   status      'featured', 'provisional' or 'revoked'
+ *   since       'YYYY-MM-DD': when the FA Status last changed to its
+ *               current label (value.changed_at): the date the app was
+ *               featured, or, for a revoked app, the date it was revoked...
+ *   sinceExact  ...true then. Monday has no change date for rows imported
+ *               when the board was created (July 2026), so `since` is the
+ *               item's creation date instead and sinceExact is false: the
+ *               app was featured (or revoked) on or before that day.
+ *   partyIds    the Canton party IDs in the Party ID cell (PARTY_ID_FIND_RE)
+ *   record      the FA Link (the public announcement), https only
+ *
+ * @param {Object} row Raw FA item {id, name, created_at, column_values}.
+ * @param {Object=} stats Run stats (partyIdUnreadable).
+ * @return {?Object} The entry, or null.
+ */
+function toPublicView_(row, stats) {
+  const cols = columnMap_(row);
+  const state = faState_(statusText_(cols[FA_COLUMNS.status])); // unknown labels are counted by toApplicantView
+  if (!hasOwn_(PUBLIC_STATUS_BY_STATE, state)) return null;
+  const changed = latestChangeDate_([cols[FA_COLUMNS.status]]);
+  const createdMs = parseIsoMs_(row ? row.created_at : null);
+  const partyText = longTextOf_(cols[FA_COLUMNS.partyId]);
+  const partyIds = partyIdsOf_(partyText);
+  if (partyText && !partyIds.length && stats) stats.partyIdUnreadable++;
+  return {
+    name: capText_(row && row.name, NAME_MAX),
+    type: capText_(statusText_(cols[FA_COLUMNS.faType]), LABEL_MAX),
+    status: PUBLIC_STATUS_BY_STATE[state],
+    since: changed || (createdMs === null ? null : new Date(createdMs).toISOString().slice(0, 10)),
+    sinceExact: Boolean(changed),
+    partyIds: partyIds,
+    record: httpsUrl_(linkOf_(cols[FA_COLUMNS.announcement]).url)
+  };
+}
+
+/**
+ * The Canton party IDs found in a Party ID cell, in order, without repeats,
+ * at most PARTY_IDS_MAX.
+ *
+ * @param {string} text The cell's text.
+ * @return {Array<string>} The IDs (empty when none is well formed).
+ */
+function partyIdsOf_(text) {
+  const ids = [];
+  (String(text || '').match(PARTY_ID_FIND_RE) || []).forEach((id) => {
+    if (ids.length < PARTY_IDS_MAX && ids.indexOf(id) === -1) ids.push(id);
+  });
+  return ids;
+}
+
+/**
+ * Sort order for the public list: apps with Featured App status before
+ * revoked ones; within each, the most recent date first, undated ones last,
+ * then by name.
+ *
+ * @param {Object} a A public entry.
+ * @param {Object} b A public entry.
+ * @return {number} Negative when a comes first.
+ */
+function comparePublic_(a, b) {
+  const revokedA = a.status === 'revoked';
+  if (revokedA !== (b.status === 'revoked')) return revokedA ? 1 : -1;
+  if (a.since !== b.since) {
+    if (!a.since) return 1;
+    if (!b.since) return -1;
+    return a.since < b.since ? 1 : -1;
+  }
+  return String(a.name || '').localeCompare(String(b.name || ''));
 }
 
 // =============================================================================
@@ -2039,11 +2261,16 @@ function shardKeyFor_(token) {
  * from Monday lose access on the next run. Each value is a JSON map of
  * token -> {apps}, and expires after CACHE_TTL_S.
  *
+ * The public list goes in the same putAll: its rows in chunks of at most
+ * PUBLIC_CHUNK_MAX_BYTES under PUBLIC_KEY + ':0', ':1'..., and an index
+ * {updated, chunks} under PUBLIC_KEY.
+ *
  * @param {Object<string, Object>} views Token -> entry.
+ * @param {{updated: string, apps: Array<Object>}} featured The public list.
  * @return {number} Size in bytes of the largest shard (for the log).
  * @throws {Error} 'cache_shard_too_large' if a shard exceeds the value limit.
  */
-function writeCache_(views) {
+function writeCache_(views, featured) {
   const shards = {};
   for (let i = 0; i < BASE64URL_ALPHABET.length; i++) {
     shards[shardKeyFor_(BASE64URL_ALPHABET.charAt(i))] = {};
@@ -2060,8 +2287,60 @@ function writeCache_(views) {
     largest = Math.max(largest, utf8Length_(values[key]));
   });
   if (largest > CACHE_VALUE_MAX_BYTES) throw fail_('cache_shard_too_large');
+
+  const chunks = chunkRows_(featured.apps, PUBLIC_CHUNK_MAX_BYTES);
+  if (chunks.length > PUBLIC_CHUNKS_MAX) throw fail_('cache_public_too_large');
+  chunks.forEach((rows, i) => { values[PUBLIC_KEY + ':' + i] = JSON.stringify(rows); });
+  values[PUBLIC_KEY] = JSON.stringify({ updated: featured.updated, chunks: chunks.length });
+
   CacheService.getScriptCache().putAll(values, CACHE_TTL_S);
   return largest;
+}
+
+/**
+ * Splits rows into chunks whose JSON stays under maxBytes (one row is far
+ * smaller: every field is capped). Always at least one chunk.
+ *
+ * @param {Array<Object>} rows The rows.
+ * @param {number} maxBytes The byte limit per chunk.
+ * @return {Array<Array<Object>>} The chunks, in order.
+ */
+function chunkRows_(rows, maxBytes) {
+  const chunks = [[]];
+  let size = 2; // "[]"
+  rows.forEach((row) => {
+    const bytes = utf8Length_(JSON.stringify(row)) + 1; // and its comma
+    if (chunks[chunks.length - 1].length && size + bytes > maxBytes) {
+      chunks.push([]);
+      size = 2;
+    }
+    chunks[chunks.length - 1].push(row);
+    size += bytes;
+  });
+  return chunks;
+}
+
+/**
+ * The public list from the cache.
+ *
+ * @return {?{updated: ?string, apps: Array<Object>}} null on a miss (no
+ *     index, or a chunk missing or unreadable).
+ */
+function readPublicCache_() {
+  const cache = CacheService.getScriptCache();
+  const index = parseJson_(cache.get(PUBLIC_KEY));
+  const count = index && typeof index === 'object' ? index.chunks : 0;
+  if (!Number.isInteger(count) || count < 1 || count > PUBLIC_CHUNKS_MAX) return null;
+  const keys = [];
+  for (let i = 0; i < count; i++) keys.push(PUBLIC_KEY + ':' + i);
+  const values = cache.getAll(keys) || {};
+  const apps = [];
+  for (let i = 0; i < keys.length; i++) {
+    const rows = parseJson_(values[keys[i]]);
+    if (!Array.isArray(rows)) return null;
+    rows.forEach((row) => apps.push(row));
+  }
+  return { updated: typeof index.updated === 'string' ? index.updated : null, apps: apps };
 }
 
 /**
@@ -2123,6 +2402,9 @@ function newStats_(mode) {
     addresses: 0,         // distinct addresses that can get a link
     dvpMatched: 0,        // DVP requests attached to at least one FA app
     dvpUnmatched: 0,      // DVP requests whose name matches no FA app
+    featured: 0,          // apps on the public list with Featured App status
+    revoked: 0,           // apps on the public list whose status was revoked
+    partyIdUnreadable: 0, // of those, apps whose Party ID cell holds no well-formed ID
     cacheLargestShard: 0, // bytes
     ms: 0,
     unknownLabels: { fa: {}, testing: {}, dvp: {}, dvpStatus: {}, email: {} }

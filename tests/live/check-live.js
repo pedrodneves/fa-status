@@ -74,7 +74,9 @@ check('setup and refresh ran against the real boards', stats && stats.faRows > 0
 const setupLine = JSON.parse(env.logs.find((l) => l.text.indexOf('"mode":"setup"') !== -1).text);
 check('no expected column is missing on either board', setupLine.missingColumns.fa.length === 0 && setupLine.missingColumns.dvp.length === 0,
   JSON.stringify(setupLine.missingColumns));
-check('every FA Status / Testing / DVP / DVP Status / Send Email label is known', ['fa', 'testing', 'dvp', 'dvpStatus', 'email'].every((b) => Object.keys(JSON.parse(env.logs.filter((l) => l.text.indexOf('"mode":"refresh"') !== -1).pop().text).unknownLabels[b]).length === 0));
+const unknownLabels = JSON.parse(env.logs.filter((l) => l.text.indexOf('"mode":"refresh"') !== -1).pop().text).unknownLabels;
+check('every FA Status / Testing / DVP / DVP Status / Send Email label is known', ['fa', 'testing', 'dvp', 'dvpStatus', 'email'].every((b) => Object.keys(unknownLabels[b]).length === 0),
+  JSON.stringify(unknownLabels));
 check('largest cache shard is well under 100 KB', stats.cacheLargestShard < 60000, stats.cacheLargestShard + ' bytes');
 console.log('     addresses ' + stats.addresses + ', apps reachable ' + stats.appsServed + ', apps without an email ' + stats.appsWithoutEmail +
   ', DVP matched ' + stats.dvpMatched + ', unmatched ' + stats.dvpUnmatched);
@@ -135,6 +137,23 @@ answers.split('\n').forEach((line) => {
 });
 check('history events carry only known kinds and fields, and DVP events belong to the app\'s own requests', badEvents === 0 && events > 0,
   events + ' events on ' + withHistory + ' apps: ' + JSON.stringify(kinds));
+
+// 3c. The public list (?view=featured): every featured and revoked app, only public fields, no address, well-formed Party IDs.
+const PUBLIC_FIELDS = 'name,type,status,since,sinceExact,partyIds,record';
+const PARTY_ID = /^[A-Za-z0-9_-](?:[A-Za-z0-9_-]|:(?!:)){0,184}::1220[0-9a-f]{64}$/;
+const featured = JSON.parse(env.call('doGet', { parameter: { view: 'featured' } }).getContent());
+const featuredApps = Array.isArray(featured.apps) ? featured.apps : [];
+check('the public list has every featured and revoked app, with only public fields',
+  featuredApps.length > 0 && featuredApps.length === stats.featured + stats.revoked && featuredApps.every((a) => Object.keys(a).join() === PUBLIC_FIELDS),
+  stats.featured + ' featured, ' + stats.revoked + ' revoked, ' + stats.partyIdUnreadable + ' whose Party ID cell holds no well-formed ID');
+check('every Party ID on the public list is well formed', featuredApps.every((a) => a.partyIds.every((id) => PARTY_ID.test(id))),
+  featuredApps.reduce((n, a) => n + a.partyIds.length, 0) + ' IDs');
+const csv = env.call('doGet', { parameter: { view: 'featured', format: 'csv' } }).getContent();
+const publicText = (JSON.stringify(featured) + '\n' + csv).toLowerCase();
+let publicLeaks = 0;
+allAddresses.forEach((e) => { if (publicText.indexOf(e) !== -1) publicLeaks++; });
+check('no email address appears in the public list or its CSV', publicLeaks === 0 && !(publicText.match(EMAIL_FIND) || []).length);
+check('the CSV has a header and one line per app', csv.trim().split('\r\n').length === featuredApps.length + 1);
 
 // 4. The email form, with MailApp mocked: a real address gets one (recorded) email whose link works; an unknown one gets nothing.
 const someone = Array.from(allAddresses)[0];

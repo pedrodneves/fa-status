@@ -9,16 +9,19 @@
  *
  *   1. reads the route from location.hash:
  *        ""                                  the start page (email form)
+ *        "#featured"                         the public list of featured apps
  *        "#<token>"                          the applications of that address
  *        "#<token>/app-<id>"                 one application
  *        "#<token>/app-<id>/dvp-<id>"        one DVP request ("/app-<id>" optional)
- *   2. asks the Apps Script web app for that token's applications with a
- *      plain GET, or sends the email form with a POST (text/plain body, no
- *      custom headers, so the browser makes no CORS preflight);
+ *   2. asks the Apps Script web app for that token's applications (or for the
+ *      public list) with a plain GET, or sends the email form with a POST
+ *      (text/plain body, no custom headers, so the browser makes no CORS
+ *      preflight);
  *   3. renders one screen into <main>, marked with a data-screen attribute:
  *        start     the email form
  *        sent      "check your email"
  *        loading   waiting for Apps Script (usually 1-2 s)
+ *        featured  the public list: every app with Featured App status
  *        list      several applications: one card each
  *        app       one application (straight away when there is only one)
  *        dvp       one DVP request of an application
@@ -35,6 +38,8 @@
  *                                finalApproval, requestUrl, requestRef, updated }] }] }
  *        { found: false }
  *        { error: "unavailable" }
+ *   GET ?view=featured
+ *        { updated, apps: [{ name, type, status, since, sinceExact, partyIds, record }] }
  *   POST { ok: true }  (the same whether or not the address applied)
  *        { ok: false, error: "invalid_email" | "unavailable" }
  *
@@ -90,7 +95,8 @@
       sending: 'Sending…',
       invalid: 'Enter one email address, like name@company.com.',
       failed: "We couldn't send your link just now. Please try again in a minute.",
-      fine: 'We only email addresses that are on a Featured App application. Questions? Contact the Featured App team at {email}.'
+      fine: 'We only email addresses that are on a Featured App application. Questions? Contact the Featured App team at {email}.',
+      publicLink: 'See which apps are featured →'  // to the public list (#featured)
     },
     sent: {
       heading: 'Check your email',
@@ -130,7 +136,7 @@
           { key: 'testing', text: 'We test your app. If we need access from you, we email you.' },
           { key: 'committee', text: 'The committee reviews your application and may invite you to its office hours.' },
           { key: 'tokenomics', text: 'Once the Featured App Committee approves, the Tokenomics Committee does the final review.' },
-          { key: 'granted', text: 'Approval is announced on the tokenomics mailing list.' }
+          { key: 'granted', text: 'Approval is announced on the tokenomics mailing list, and the app joins the public list of featured apps.' }
         ]
       },
       // Labels and explanations come from fa.states.
@@ -145,6 +151,7 @@
         items: [
           { q: "I didn't get an email", a: 'Links can take a few minutes, so check your spam folder. We only email addresses that are on an application, as its main email or as a responsible person. Nothing after 15 minutes? Try another address you applied with, or contact the Featured App team at {email}.' },
           { q: 'Who can see my status?', a: 'Anyone who has your link. Each address on an application gets its own link, which shows only the applications that list that address. Share it only within your team.' },
+          { q: 'Is anything about my application public?', a: "Only once your app is featured. The public list of featured apps then shows its name, Featured App type, status, the date it was featured, its Party ID and the announcement. If the status is later revoked, the app stays on the list as revoked, with the date. Nothing else from your application is public." },
           { q: 'How current is the page?', a: "It refreshes from the committee's records every 10 minutes. Each application shows the date its record last changed." },
           { q: 'I lost my link. Can I get it again?', a: "Yes. Enter your email address above and we'll send the same link again. You can ask once every 15 minutes, up to three times in six hours." },
           { q: "My DVP request isn't showing", a: 'DVP requests are matched to applications by name. If your request uses a different name from your application, contact the Featured App team at {email} so they can link them.' },
@@ -154,13 +161,14 @@
     },
 
     // ---- Footer (every screen) -----------------------------------------------
-    // `url: 'reapply'` means config.reapplyUrl; `email: true` is the support address.
+    // `url: 'reapply'` means config.reapplyUrl; `email: true` is the support
+    // address; `hash` is a screen of this page.
     siteFooter: {
       label: 'Useful links',
-      about: "Featured App Status shows applicants where their applications stand. It's read-only: to change anything, contact the Featured App team.",
+      about: "Featured App Status shows applicants where their applications stand, and everyone which apps are featured. It's read-only: to change anything, contact the Featured App team.",
       groups: [
         { heading: 'Apply', links: [{ text: 'Featured App request ↗', url: 'reapply' }, { text: 'canton.foundation ↗', url: 'https://canton.foundation/' }] },
-        { heading: 'Public record', links: [{ text: 'Accountability mailing list ↗', url: 'https://lists.sync.global/g/accountability' }] },
+        { heading: 'Public record', links: [{ text: 'Featured apps', hash: 'featured' }, { text: 'Accountability mailing list ↗', url: 'https://lists.sync.global/g/accountability' }] },
         { heading: 'Contact', links: [{ email: true }] }
       ]
     },
@@ -175,6 +183,77 @@
       heading: "We couldn't load your status",
       body: 'Please check your connection and try again. If this keeps happening, contact the Featured App team at {email}.',
       retry: 'Try again'
+    },
+
+    // ---- The public list of featured apps (#featured) ------------------------
+    // Everyone sees the same list. Type labels and their filters come from
+    // the data (the FA Type column), so a new type shows up on its own.
+    featured: {
+      title: 'Featured apps',  // browser tab title
+      eyebrow: 'Public record',
+      heading: 'Featured apps',
+      intro: 'Apps that hold Featured App status on Canton Network, with their type and Party ID, and the apps whose status was revoked. Nothing else from their applications is shown.',
+      back: '← Check your own application',
+      loading: 'Loading the list of featured apps…',
+      error: {
+        heading: "We couldn't load the list",
+        body: 'Please check your connection and try again. If this keeps happening, contact the Featured App team at {email}.'
+      },
+      // The numbers in the band. `assetMoving` counts this FA Type label.
+      stats: { total: 'Featured apps', assetMoving: 'Asset-moving', provisional: 'Provisional' },
+      assetMovingType: 'Featured Asset-Moving App',
+      searchLabel: 'Search by app name or Party ID',
+      searchPlaceholder: 'e.g. wallet',
+      filtersLabel: 'Filter the list',
+      filters: { all: 'All', none: 'Type not set', provisional: 'Provisional' },
+      // Type labels in this order first, then any other alphabetically.
+      typeOrder: ['Basic Featured App', 'Featured Asset-Moving App', 'Featured Asset'],
+      columns: { app: 'App', type: 'Featured App type', status: 'Status', since: 'Featured since', revokedOn: 'Revoked on', record: 'Public record' },
+      status: {
+        featured: { label: 'Featured', tone: 'ok' },
+        provisional: { label: 'Provisional', tone: 'warn' },
+        revoked: { label: 'Revoked', tone: 'bad' }
+      },
+      // Apps whose Featured App status was revoked: a card of their own under
+      // the list, searched with it. Shown only when there are any.
+      revoked: {
+        heading: 'Featured status revoked',
+        intro: 'These apps held Featured App status, and the committee has revoked it. They no longer have Featured App status.',
+        empty: 'No revoked app matches that search.'
+      },
+      typeNotSet: 'Not set yet',
+      sinceBy: 'By {date}',  // sinceExact false: featured (or revoked) on or before that day
+      record: 'Announcement ↗',
+      noRecord: 'Not linked',
+      partyId: 'Party ID',
+      noPartyId: 'No Party ID on file',
+      copy: 'Copy',
+      copyName: 'Copy the Party ID of {name}',  // the copy button's accessible name
+      provisionalNote: "Provisional: the committee set conditions for this status, and can revoke it if they aren't met.",
+      showing: 'Showing {shown} of {total}',
+      updated: 'Updated {day}, {time}',
+      empty: 'No featured app matches that search.',
+      none: 'No apps are listed yet.',
+      csv: 'Download CSV',
+      json: 'JSON feed ↗',
+      feed: {
+        heading: 'Use this list in your tools',
+        text: 'The same list is available as JSON and as a CSV file, for monitoring and automations. It refreshes every 10 minutes.',
+        fields: 'Each app has: name, type, status ("featured", "provisional" or "revoked"), since, sinceExact, partyIds and record. For a revoked app, since is the date its status was revoked.',
+        copy: 'Copy',
+        copyName: 'Copy the JSON feed address'
+      },
+      about: {
+        heading: 'About this list',
+        items: [
+          "It comes from the Featured App Committee's records and refreshes every 10 minutes.",
+          "Shown for each app: its name, Featured App type, status, the date it was featured, its Party ID and the public announcement. Nothing else from its application.",
+          'Apps whose status was revoked are listed separately, with the date it was revoked.',
+          '"By 7 Jul 2026" means the app was featured (or revoked) on or before that day: the records of when a status changed start in July 2026.'
+        ],
+        apply: 'Applied and waiting? {link} with your email address.',
+        applyLink: 'Check your own application'
+      }
     },
 
     // ---- Shared by the application and DVP pages ---------------------------
@@ -237,6 +316,7 @@
         in_review_locked: 'Canton Coin lock confirmed',
         with_tokenomics: 'Approved by the Featured App Committee',
         approved: 'Featured App status granted',
+        provisional: 'Provisionally approved',
         on_hold: 'Review paused',
         not_approved: 'Not approved',
         revoked: 'Featured status revoked',
@@ -272,6 +352,7 @@
     // The help box at the bottom of the side column.
     help: {
       app: 'Questions about this application?',
+      decision: 'Questions about this decision?',  // not approved
       dvp: 'Questions about this request?',
       text: 'The Featured App team can help with anything on this page.',
       button: 'Email {email}',
@@ -332,6 +413,8 @@
       // FA states (the backend maps the FA Status column to these keys).
       // Any other value is shown as in_review. `next` fills the "What
       // happens next" box; states without it don't show the box.
+      // "provisional" needs a "2b-Provisional" FA Status label, which the
+      // board doesn't have yet: until the committee adds it, no app has it.
       states: {
         received: {
           label: 'Received', tone: 'info',
@@ -354,15 +437,25 @@
           linkText: 'View the public announcement ↗',  // to app.announcement (https only)
           next: 'Nothing more is needed for this application.'
         },
+        provisional: {
+          label: 'Provisionally approved', tone: 'warn',
+          message: 'Your app has Featured App status on a provisional basis: the committee set conditions for it, which are in our email.',
+          linkText: 'View the public announcement ↗',  // to app.announcement (https only)
+          next: "Keep to the conditions in our email. If one isn't met, the committee can revoke Featured App status. We'll email you if anything about your status changes."
+        },
         on_hold: {
           label: 'On hold', tone: 'warn',
           message: 'Review is paused while CIP-0116 is resolved. This page will update when review resumes.',
           next: "You don't need to do anything. Review picks up again once CIP-0116 is resolved."
         },
+        // The board records no reason for the decision, so the page points
+        // to the committee's email, which gives it. Under the next box: a
+        // link to config.reapplyUrl and the contact line (faStatusAction).
         not_approved: {
           label: 'Not approved', tone: 'bad',
-          message: 'The committee did not approve this application.',
-          contact: true
+          message: 'The Featured App Committee did not approve this application. Our email explains why.',
+          linkText: 'Apply again ↗',
+          next: 'You can apply again after three months. If you substantially change your proposal, you can resubmit sooner, once the changed version is live on MainNet.'
         },
         revoked: {
           label: 'Featured status revoked', tone: 'bad',
@@ -398,7 +491,18 @@
         inProgress: 'In progress',
         paused: 'Paused while CIP-0116 is resolved',
         approved: 'Approved',
-        announced: 'Announced on the tokenomics mailing list'
+        announced: 'Announced on the tokenomics mailing list',
+        decided: 'Decided {date}',  // not approved: the date of the decision
+        decision: 'Review ended',   // not approved, date unknown
+        conditions: 'Conditions apply'  // provisional
+      },
+      provisionalFlag: 'Provisional',  // pill on the last step of a provisional app
+      // Side card on featured apps: what the public list shows about them.
+      publicCard: {
+        heading: 'On the public list',
+        text: 'Your app is on the public list of featured apps, with its name, Featured App type, status, the date it was featured, its Party ID and the announcement. Nothing else from your application is public.',
+        revokedText: 'Your app is on the public list as revoked, with its name, Featured App type, the date its status was revoked, its Party ID and the announcement. Nothing else from your application is public.',
+        link: 'View the public list'
       },
       // The final "stop" step when an application ended without, or lost,
       // Featured App status.
@@ -441,7 +545,7 @@
           },
           declined: {
             title: 'Application closed',
-            text: "The committee found that the app isn't ready for approval yet. You can apply again after three months, once the issues are addressed. Our email has the details."
+            text: "The committee found that the app isn't ready for approval yet. You can apply again after three months, or sooner with a substantially changed proposal once it's live on MainNet. Our email has the details."
           }
         }
       },
@@ -560,12 +664,20 @@
   // Locked Canton Coin in millions: 1.5 -> "1.5", 2 -> "2".
   const AMOUNT_FORMAT = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 6 });
 
-  // FA states whose timeline stops right after "Application received".
+  // FA states that ended before Featured App status: no testing tile, and a
+  // timeline that stops early (withdrawn and closed right after "Application
+  // received"; not approved after the committee's decision).
   const FA_ENDED_EARLY = ['not_approved', 'withdrawn', 'closed_process'];
 
   // FA states where Featured App status was granted (and possibly revoked
   // later). Their timeline leaves out lock and testing steps with no data.
-  const FA_GRANTED = ['approved', 'revoked'];
+  const FA_GRANTED = ['approved', 'provisional', 'revoked'];
+
+  // FA states that hold Featured App status now: they are on the public list.
+  const FA_FEATURED = ['approved', 'provisional'];
+
+  // The route of the public list: "#featured".
+  const FEATURED_ROUTE = 'featured';
 
   // FA states still moving through review, for the "in progress" chip on the list.
   const FA_ACTIVE = ['received', 'in_review', 'with_tokenomics', 'on_hold'];
@@ -616,6 +728,7 @@
    * Reads a location.hash value and says what it asks for.
    *
    *   parseRoute('')                                -> { kind: 'none', code: null, appId: null, dvpId: null }
+   *   parseRoute('#featured')                       -> { kind: 'featured', code: null, appId: null, dvpId: null }
    *   parseRoute('#k7Qm2xV9pLr4TzN8wYc3Ef')         -> { kind: 'code', code: 'k7Qm…', appId: null, dvpId: null }
    *   parseRoute('#k7Qm2xV9pLr4TzN8wYc3Ef/app-12')  -> { kind: 'code', code: 'k7Qm…', appId: '12', dvpId: null }
    *   parseRoute('#k7Qm…/app-12/dvp-147).')         -> { kind: 'code', code: 'k7Qm…', appId: '12', dvpId: '147' }
@@ -638,6 +751,7 @@
     value = value.trim().replace(TRAILING_PUNCTUATION, '');
 
     if (value === '') return { kind: 'none', code: null, appId: null, dvpId: null };
+    if (value === FEATURED_ROUTE) return { kind: 'featured', code: null, appId: null, dvpId: null };
     const match = ROUTE_PATTERN.exec(value);
     if (!match) return { kind: 'invalid', code: null, appId: null, dvpId: null };
     return { kind: 'code', code: match[1], appId: match[2] || null, dvpId: match[3] || null };
@@ -997,10 +1111,11 @@
 
   /**
    * The status box: "Where things stand", the message, an optional extra
-   * (link or contact line), "What happens next" when the state has one, and
-   * the last update. The pill itself sits in the band (heroTitle).
+   * (link or contact line), "What happens next" when the state has one, an
+   * optional action under it, and the last update. The pill itself sits in
+   * the band (heroTitle).
    */
-  function statusBox(words, extra, updated) {
+  function statusBox(words, extra, updated, action) {
     const lastUpdated = formatDate(updated);
     return el('section', { class: 'card status-box', 'data-section': 'status' }, [
       el('h2', { class: 'card-h', text: TEXT.statusHeading }),
@@ -1013,6 +1128,7 @@
           el('p', { class: 'next-text', text: words.next })
         ])
       ]) : null,
+      action,
       lastUpdated ? el('p', { class: 'when', text: fillText(TEXT.lastUpdated, { date: lastUpdated }) }) : null
     ]);
   }
@@ -1094,7 +1210,17 @@
     const details = TEXT.fa.details;
     const steps = [step('received', 'done', titles.received, formatDate(app.submitted))];
 
-    // Not approved, withdrawn or closed: "received", then how it ended. Nothing else.
+    // Not approved: "received", the lock if it was verified, the committee's
+    // decision (with its date when known), then the outcome.
+    if (state === 'not_approved') {
+      const decided = decisionDate(app);
+      steps.push(lockStep(app, true));
+      steps.push(step('committee', 'done', titles.committee, decided ? fillText(details.decided, { date: decided }) : details.decision));
+      steps.push(step('outcome', 'stop', TEXT.fa.outcomes.not_approved.title, TEXT.fa.outcomes.not_approved.detail));
+      return steps.filter(Boolean);
+    }
+
+    // Withdrawn or closed: "received", then how it ended. Nothing else.
     if (FA_ENDED_EARLY.indexOf(state) !== -1) {
       const outcome = TEXT.fa.outcomes[state];
       steps.push(step('outcome', 'stop', outcome.title, outcome.detail));
@@ -1103,19 +1229,9 @@
 
     const granted = FA_GRANTED.indexOf(state) !== -1;
 
-    // Canton Coin lock: done once verified (date, plus the amount if known),
-    // or once the FA Status says the lock is in place (lock.confirmed).
-    // Granted apps with no verification date simply don't show the step.
-    const lock = isObject(app.lock) ? app.lock : {};
-    const amount = formatAmount(lock.amountMillions);
-    if (textOf(lock.verified) !== '' || lock.confirmed === true) {
-      steps.push(step('lock', 'done', titles.lock, joinParts([
-        formatDate(lock.verified) || details.lockConfirmed,
-        amount ? fillText(details.lockAmount, { amount: amount }) : ''
-      ])));
-    } else if (!granted) {
-      steps.push(step('lock', 'todo', titles.lock, details.lockNotVerified));
-    }
+    // Canton Coin lock. Granted apps with no verification date simply don't show the step.
+    const lock = lockStep(app, granted);
+    if (lock) steps.push(lock);
 
     // Testing.
     const testing = normalizeTesting(app.testing);
@@ -1139,7 +1255,7 @@
     } else if (state === 'on_hold') {
       steps.push(step('committee', 'current', titles.committee, details.paused));
     } else {
-      // with_tokenomics, approved, revoked: the committee approved it.
+      // with_tokenomics, approved, provisional, revoked: the committee approved it.
       steps.push(step('committee', 'done', titles.committee, details.approved));
     }
 
@@ -1152,14 +1268,55 @@
       steps.push(step('tokenomics', 'todo', titles.tokenomics, details.notStarted));
     }
 
-    // Featured App status granted (announced on the tokenomics mailing list).
-    steps.push(step('granted', granted ? 'done' : 'todo', titles.granted, details.announced));
+    // Featured App status granted (announced on the tokenomics mailing list),
+    // or granted with conditions: flagged "Provisional".
+    if (state === 'provisional') {
+      steps.push(step('granted', 'done', titles.granted, details.conditions, { label: TEXT.fa.provisionalFlag, tone: 'warn' }));
+    } else {
+      steps.push(step('granted', granted ? 'done' : 'todo', titles.granted, details.announced));
+    }
 
     // Revoked later: one more "stop" step.
     if (state === 'revoked') {
       steps.push(step('outcome', 'stop', TEXT.fa.outcomes.revoked.title, TEXT.fa.outcomes.revoked.detail));
     }
     return steps;
+  }
+
+  /**
+   * The Canton Coin lock step: done once verified (date, plus the amount if
+   * known), or once the FA Status says the lock is in place (lock.confirmed).
+   * Otherwise "not verified yet", or null when `optional` (granted or
+   * decided applications don't show a lock step without data).
+   */
+  function lockStep(app, optional) {
+    const details = TEXT.fa.details;
+    const lock = isObject(app.lock) ? app.lock : {};
+    const amount = formatAmount(lock.amountMillions);
+    if (textOf(lock.verified) !== '' || lock.confirmed === true) {
+      return step('lock', 'done', TEXT.fa.steps.lock, joinParts([
+        formatDate(lock.verified) || details.lockConfirmed,
+        amount ? fillText(details.lockAmount, { amount: amount }) : ''
+      ]));
+    }
+    return optional ? null : step('lock', 'todo', TEXT.fa.steps.lock, details.lockNotVerified);
+  }
+
+  /**
+   * When the committee decided not to approve, as "12 Nov 2026": the latest
+   * change to "Not approved" in the history, or else the date of the
+   * committee's decline email. "" when neither is known.
+   */
+  function decisionDate(app) {
+    let latest = '';
+    (Array.isArray(app.history) ? app.history : []).filter(isObject).forEach(function (e) {
+      const at = textOf(e.at);
+      if (e.kind === 'status' && textOf(e.to) === 'not_approved' && HISTORY_AT_PATTERN.test(at) && at > latest) latest = at;
+    });
+    const time = latest ? historyTime(latest) : null;
+    if (time) return time.day;
+    const email = latestEmail(app);
+    return email && email.kind === 'declined' ? email.date : '';
   }
 
   /** The steps of a DVP request's timeline. `state` is already normalised. */
@@ -1247,8 +1404,9 @@
    * the statuses and the FAQ.
    */
   function startLayout(screen, heroMain) {
+    const publicLink = el('a', { class: 'hero-link', href: '#' + FEATURED_ROUTE, text: TEXT.start.publicLink });
     show(screen, null, [
-      hero([el('div', { class: 'hero-main' }, heroMain), exampleCard()], 'hero-start'),
+      hero([el('div', { class: 'hero-main' }, heroMain.concat(publicLink)), exampleCard()], 'hero-start'),
       promisesSection(),
       howSection(),
       statusesSection(),
@@ -1376,19 +1534,22 @@
 
   // ---- Screens without application data
 
-  function showError() {
+  /** The error screen with "Try again". `words` ({heading, body}) defaults to TEXT.error. */
+  function showError(words) {
+    const w = words || TEXT.error;
     const retry = el('button', { class: 'p-btn', type: 'button', 'data-action': 'retry', text: TEXT.error.retry });
     retry.addEventListener('click', retryRequest);
     show('error', null, el('div', { class: 'p-body p-narrow' }, [
-      messageHead(TEXT.error.heading, fill(TEXT.error.body, { email: emailLink() })),
+      messageHead(w.heading, fill(w.body, { email: emailLink() })),
       retry
     ]));
   }
 
-  function showLoading() {
+  /** The loading screen. `text` defaults to TEXT.loading. */
+  function showLoading(text) {
     show('loading', null, el('div', { class: 'p-body p-narrow' }, el('div', { class: 'loading', role: 'status' }, [
       el('span', { class: 'spinner', 'aria-hidden': 'true' }),
-      el('p', { text: TEXT.loading })
+      el('p', { text: text || TEXT.loading })
     ])));
   }
 
@@ -1401,7 +1562,7 @@
       const state = normalizeState(app.state, TEXT.fa.states, 'in_review');
       const words = TEXT.fa.states[state];
       if (FA_ACTIVE.indexOf(state) !== -1) counts.active += 1;
-      else if (state === 'approved') counts.approved += 1;
+      else if (FA_FEATURED.indexOf(state) !== -1) counts.approved += 1;
       else counts.ended += 1;
 
       const steps = faSteps(app, state);
@@ -1487,14 +1648,24 @@
       ]),
       tiles,
       columns([
-        statusBox(words, faStatusExtra(app, state, words), app.updated),
+        statusBox(words, faStatusExtra(app, state, words), app.updated, faStatusAction(state, words)),
         updateSection(app),
         historySection(app, words)
       ], [
         onFileSection(app),
+        FA_GRANTED.indexOf(state) !== -1 ? publicListCard(state) : null,
         dvpListSection(code, apps, app),
-        helpCard(TEXT.help.app)
+        helpCard(state === 'not_approved' ? TEXT.help.decision : TEXT.help.app)
       ], !tiles)
+    ]);
+  }
+
+  /** "On the public list": what everyone can see about a featured (or revoked) app, with a link to the list. */
+  function publicListCard(state) {
+    const words = TEXT.fa.publicCard;
+    return section('public', words.heading, [
+      el('p', { class: 'p-fine', text: state === 'revoked' ? words.revokedText : words.text }),
+      el('a', { class: 'card-link', href: '#' + FEATURED_ROUTE, text: words.link })
     ]);
   }
 
@@ -1532,7 +1703,7 @@
 
   /** What goes under the FA status message: a link or the contact line, or nothing. */
   function faStatusExtra(app, state, words) {
-    if (state === 'approved') {
+    if (FA_FEATURED.indexOf(state) !== -1) {
       const announcement = parseHttpsUrl(app.announcement);
       return announcement ? externalLink(announcement, words.linkText, 'status-action') : null;
     }
@@ -1541,6 +1712,13 @@
       return reapply ? externalLink(reapply, words.linkText, 'status-action p-btn') : null;
     }
     return words.contact ? contactLine() : null;
+  }
+
+  /** What goes under "What happens next": for a declined application, "Apply again" and the contact line. */
+  function faStatusAction(state, words) {
+    if (state !== 'not_approved') return null;
+    const reapply = parseHttpsUrl(CONFIG.reapplyUrl);
+    return [reapply ? externalLink(reapply, words.linkText, 'status-action p-btn') : null, contactLine()];
   }
 
   /** The latest committee email (app.update) as { kind, words, date, iso }, or null when there is none or its kind is unknown. */
@@ -1746,17 +1924,24 @@
     return rows.length ? section('on-file', TEXT.fa.onFile, el('dl', { class: 'kv' }, rows)) : null;
   }
 
-  /** "Copy Party ID", only where the browser allows writing to the clipboard. */
-  function copyButton(text) {
+  /**
+   * A copy button ("Copy Party ID" unless `words.label` says otherwise), only
+   * where the browser allows writing to the clipboard. `words.name` is an
+   * accessible name for buttons that repeat down a list.
+   */
+  function copyButton(text, words) {
     if (!window.isSecureContext || !navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') return null;
-    const label = el('span', { text: TEXT.fa.copy });
-    const button = el('button', { class: 'copy', type: 'button', 'data-action': 'copy' }, [icon('copy'), label]);
+    const idle = words && words.label ? words.label : TEXT.fa.copy;
+    const label = el('span', { text: idle });
+    const button = el('button', {
+      class: 'copy', type: 'button', 'data-action': 'copy', 'aria-label': words && words.name ? words.name : null
+    }, [icon('copy'), label]);
     let timer = 0;
     button.addEventListener('click', function () {
       navigator.clipboard.writeText(text).then(function () {
         label.textContent = TEXT.fa.copied;
         window.clearTimeout(timer);
-        timer = window.setTimeout(function () { label.textContent = TEXT.fa.copy; }, 2000);
+        timer = window.setTimeout(function () { label.textContent = idle; }, 2000);
       }, function () {
         // Clipboard refused (permissions): the ID stays selectable on the page.
       });
@@ -1894,6 +2079,208 @@
     ]);
   }
 
+  // ---- The public list of featured apps
+
+  /**
+   * The public list (#featured): the numbers in the band, then search, type
+   * filters and one row per app, then the revoked apps (when any), then how
+   * to use the list in other tools. `list` is { updated, apps } from
+   * readFeatured(); `apiUrl` is the web app. The search covers both lists.
+   * Searching and filtering re-render the rows only, so focus stays put.
+   */
+  function showFeatured(list, apiUrl) {
+    const w = TEXT.featured;
+    const isRevoked = function (app) { return app.status === 'revoked'; };
+    const apps = list.apps.filter(function (app) { return !isRevoked(app); });
+    const revoked = list.apps.filter(isRevoked);
+    const filters = featuredFilters(apps);
+    const state = { filter: filters[0], query: '' };
+
+    const rows = el('ul', { class: 'pub-list' });
+    const revokedRows = el('ul', { class: 'pub-list' });
+    const foot = el('p', { class: 'pub-foot', 'aria-live': 'polite' });
+    const updated = historyTime(list.updated);
+    function render() {
+      const query = state.query.trim().toLowerCase();
+      const matches = function (app) {
+        if (!query) return true;
+        return textOf(app.name).toLowerCase().indexOf(query) !== -1 ||
+          partyIdsOf(app).some(function (id) { return id.toLowerCase().indexOf(query) !== -1; });
+      };
+      const shown = apps.filter(state.filter.test).filter(matches);
+      rows.textContent = '';
+      append(rows, shown.length ? shown.map(featuredRow) : el('li', { class: 'pub-empty', text: apps.length ? w.empty : w.none }));
+      foot.textContent = joinParts([
+        fillText(w.showing, { shown: String(shown.length), total: String(apps.length) }),
+        updated ? fillText(w.updated, { day: updated.day, time: updated.time }) : ''
+      ]);
+      const shownRevoked = revoked.filter(matches);
+      revokedRows.textContent = '';
+      append(revokedRows, shownRevoked.length ? shownRevoked.map(featuredRow) : el('li', { class: 'pub-empty', text: w.revoked.empty }));
+    }
+
+    const search = el('input', {
+      id: 'pub-search', class: 'pub-input', type: 'search', autocomplete: 'off', spellcheck: 'false', placeholder: w.searchPlaceholder
+    });
+    search.addEventListener('input', function () { state.query = search.value; render(); });
+
+    const chips = filters.map(function (f) {
+      const button = el('button', { class: 'filter', type: 'button', 'aria-pressed': String(f === state.filter), 'data-filter': f.key }, [
+        f.label, ' ', el('span', { class: 'filter-count', text: String(f.count) })
+      ]);
+      button.addEventListener('click', function () {
+        state.filter = f;
+        chips.forEach(function (chip) { chip.setAttribute('aria-pressed', String(chip === button)); });
+        render();
+      });
+      return button;
+    });
+
+    const feedUrl = apiUrl + (apiUrl.indexOf('?') === -1 ? '?' : '&') + 'view=featured';
+    const feedLink = parseHttpsUrl(feedUrl);
+    const csvLink = parseHttpsUrl(feedUrl + '&format=csv');
+    const provisional = apps.filter(function (app) { return app.status === 'provisional'; }).length;
+    const assetMoving = apps.filter(function (app) { return textOf(app.type) === w.assetMovingType; }).length;
+    const stats = [
+      { label: w.stats.total, value: apps.length },
+      { label: w.stats.assetMoving, value: assetMoving },
+      provisional ? { label: w.stats.provisional, value: provisional, warn: true } : null
+    ].filter(Boolean);
+
+    show('featured', w.title, [
+      hero([
+        el('a', { class: 'back', href: '#', text: w.back }),
+        el('div', { class: 'pub-hero' }, [
+          heroHead(w.eyebrow, w.heading, w.intro),
+          el('dl', { class: 'pub-stats' }, stats.map(function (s) {
+            return el('div', { class: 'pub-stat' + (s.warn ? ' warn' : '') }, [
+              el('dt', { text: s.label }),
+              el('dd', { text: String(s.value) })
+            ]);
+          }))
+        ])
+      ]),
+      el('div', { class: 'wrap overlap' }, el('section', { class: 'card pub-card', 'data-section': 'featured', 'aria-label': w.heading }, [
+        el('div', { class: 'pub-tools' }, [
+          el('div', { class: 'pub-search' }, [el('label', { for: 'pub-search', text: w.searchLabel }), search]),
+          el('div', { class: 'pub-actions' }, [
+            csvLink ? externalLink(csvLink, w.csv, 'p-btn secondary') : null,
+            feedLink ? externalLink(feedLink, w.json, 'p-btn secondary') : null
+          ])
+        ]),
+        el('div', { class: 'filters', role: 'group', 'aria-label': w.filtersLabel }, chips),
+        el('div', { class: 'pub-head', 'aria-hidden': 'true' }, [
+          el('span', { text: w.columns.app }), el('span', { text: w.columns.type }), el('span', { text: w.columns.status }),
+          el('span', { text: w.columns.since }), el('span', { text: w.columns.record })
+        ]),
+        rows,
+        foot
+      ])),
+      revoked.length ? el('div', { class: 'wrap pub-gap' }, el('section', { class: 'card pub-card', 'data-section': 'revoked', 'aria-labelledby': 'pub-revoked-h' }, [
+        el('h2', { class: 'card-h', id: 'pub-revoked-h' }, [w.revoked.heading, ' ', el('span', { class: 'filter-count', text: String(revoked.length) })]),
+        el('p', { class: 'p-fine', text: w.revoked.intro }),
+        el('div', { class: 'pub-head', 'aria-hidden': 'true' }, [
+          el('span', { text: w.columns.app }), el('span', { text: w.columns.type }), el('span', { text: w.columns.status }),
+          el('span', { text: w.columns.revokedOn }), el('span', { text: w.columns.record })
+        ]),
+        revokedRows
+      ])) : null,
+      el('div', { class: 'wrap pub-more' }, [
+        feedLink ? el('section', { class: 'card pub-feed', 'data-section': 'feed' }, [
+          el('h2', { class: 'card-h', text: w.feed.heading }),
+          el('p', { text: w.feed.text }),
+          el('div', { class: 'feed-url' }, [
+            el('code', { class: 'mono feed-code', text: 'GET ' + feedLink.href }),
+            copyButton(feedLink.href, { label: w.feed.copy, name: w.feed.copyName })
+          ]),
+          el('p', { class: 'p-fine', text: w.feed.fields })
+        ]) : null,
+        el('section', { class: 'card pub-about', 'data-section': 'about' }, [
+          el('h2', { class: 'card-h', text: w.about.heading }),
+          w.about.items.map(function (text) { return el('p', { class: 'p-fine', text: text }); }),
+          el('p', { class: 'p-fine' }, fill(w.about.apply, { link: el('a', { href: '#', text: w.about.applyLink }) }))
+        ])
+      ])
+    ]);
+    render();
+  }
+
+  /**
+   * The filter chips: "All", one per FA Type label in the data
+   * (TEXT.featured.typeOrder first), "Type not set" and "Provisional" when
+   * any app has them. Each is { key, label, count, test(app) }.
+   */
+  function featuredFilters(apps) {
+    const w = TEXT.featured;
+    const types = {};
+    let none = 0;
+    let provisional = 0;
+    apps.forEach(function (app) {
+      const type = textOf(app.type);
+      if (type) types[type] = (types[type] || 0) + 1;
+      else none += 1;
+      if (app.status === 'provisional') provisional += 1;
+    });
+    const rank = function (type) {
+      const i = w.typeOrder.indexOf(type);
+      return i === -1 ? w.typeOrder.length : i;
+    };
+    const filters = [{ key: 'all', label: w.filters.all, count: apps.length, test: function () { return true; } }];
+    Object.keys(types).sort(function (a, b) { return rank(a) - rank(b) || a.localeCompare(b); }).forEach(function (type) {
+      filters.push({ key: 'type', label: type, count: types[type], test: function (app) { return textOf(app.type) === type; } });
+    });
+    if (none) filters.push({ key: 'none', label: w.filters.none, count: none, test: function (app) { return !textOf(app.type); } });
+    if (provisional) filters.push({ key: 'provisional', label: w.filters.provisional, count: provisional, test: function (app) { return app.status === 'provisional'; } });
+    return filters;
+  }
+
+  /** An app's Party IDs (strings only). */
+  function partyIdsOf(app) {
+    return Array.isArray(app.partyIds) ? app.partyIds.map(textOf).filter(Boolean) : [];
+  }
+
+  /**
+   * One app on the public list: name, type, status, since (the date it was
+   * featured, or revoked), announcement, then its Party IDs (with copy
+   * buttons) on a line of their own. Each cell starts with its column name
+   * for screen readers (the header row is visual).
+   */
+  function featuredRow(app) {
+    const w = TEXT.featured;
+    const name = textOf(app.name) || TEXT.fa.untitled;
+    const type = textOf(app.type);
+    const status = hasOwn(w.status, app.status) ? w.status[app.status] : w.status.featured;
+    const date = formatDate(app.since);
+    const since = date && app.sinceExact === false ? fillText(w.sinceBy, { date: date }) : date;
+    const record = parseHttpsUrl(app.record);
+    const ids = partyIdsOf(app);
+    const label = function (text) { return el('span', { class: 'visually-hidden', text: text + ': ' }); };
+    return el('li', { class: 'pub-row', 'data-status': hasOwn(w.status, app.status) ? app.status : 'featured' }, [
+      el('span', { class: 'pub-name', text: name }),
+      el('span', { class: 'pub-type' + (type ? '' : ' muted') }, [label(w.columns.type), type || w.typeNotSet]),
+      el('span', { class: 'pub-status' }, [label(w.columns.status), pill(status.label, status.tone)]),
+      el('span', { class: 'pub-since' }, [label(app.status === 'revoked' ? w.columns.revokedOn : w.columns.since), since || '—']),
+      el('span', { class: 'pub-record' }, [
+        label(w.columns.record),
+        record ? externalLink(record, w.record) : el('span', { class: 'muted', text: w.noRecord })
+      ]),
+      el('div', { class: 'pub-party' }, ids.length ? ids.map(function (id) {
+        return el('span', { class: 'pub-party-row' }, [
+          el('span', { class: 'pub-party-label', text: w.partyId }),
+          el('span', { class: 'mono pub-party-id', 'data-field': 'party-id', text: id }),
+          copyButton(id, { label: w.copy, name: fillText(w.copyName, { name: name }) })
+        ]);
+      }) : el('span', { class: 'pub-party-label', text: w.noPartyId })),
+      app.status === 'provisional' ? el('p', { class: 'pub-note', text: w.provisionalNote }) : null
+    ]);
+  }
+
+  /** Reads the public list's JSON body: { updated, apps }, or null for anything unusable. */
+  function readFeatured(body) {
+    if (!isObject(body) || body.error || !Array.isArray(body.apps)) return null;
+    return { updated: textOf(body.updated), apps: body.apps.filter(isObject) };
+  }
+
   // ---- Footer
 
   /** Fills the footer (every screen) with the links in TEXT.siteFooter. Runs once. */
@@ -1904,6 +2291,7 @@
     const groups = words.groups.map(function (group) {
       const links = group.links.map(function (link) {
         if (link.email) return emailLink() || null;
+        if (link.hash) return el('a', { href: '#' + link.hash, text: link.text });
         const url = parseHttpsUrl(link.url === 'reapply' ? CONFIG.reapplyUrl : link.url);
         return url ? externalLink(url, link.text) : null;
       }).filter(Boolean);
@@ -2124,20 +2512,51 @@
       showError();
       return;
     }
+    showLoading();
+    const url = apiUrl + (apiUrl.indexOf('?') === -1 ? '?' : '&') + 'link=' + encodeURIComponent(code);
+    startGet(url, function (id, body) { finish(id, readAnswer(body)); });
+  }
 
+  /** Asks Apps Script for the public list, showing the loading screen meanwhile. */
+  function loadFeatured() {
+    cancelRequest();
+    session.code = null;
+    session.answer = null;
+
+    const apiUrl = configuredApiUrl();
+    if (!apiUrl) {
+      showError(TEXT.featured.error);
+      return;
+    }
+    showLoading(TEXT.featured.loading);
+    startGet(apiUrl + (apiUrl.indexOf('?') === -1 ? '?' : '&') + 'view=featured', function (id, body) {
+      if (id !== session.pending) return;  // stale, cancelled or already finished
+      endRequest();
+      if (parseRoute(window.location.hash).kind !== 'featured') return;  // the visitor moved on
+      const list = readFeatured(body);
+      if (list) showFeatured(list, apiUrl);
+      else showError(TEXT.featured.error);
+    });
+  }
+
+  /**
+   * Starts a plain GET to Apps Script as the request in flight: no custom
+   * headers and no cache option, so no CORS preflight. `done(id, body)` gets
+   * the request's number and the parsed JSON, or null for a network error,
+   * an abort, a bad status, a body that isn't JSON or a timeout.
+   */
+  function startGet(url, done) {
     requestCount += 1;
     const id = requestCount;
     session.pending = id;
-    showLoading();
 
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
     session.controller = controller;
     session.timer = window.setTimeout(function () {
-      finish(id, null);  // timed out: show the error screen
+      done(id, null);  // timed out: show the error screen
       if (controller) controller.abort();
     }, REQUEST_TIMEOUT_MS);
 
-    // A plain GET: no custom headers and no cache option, so no CORS preflight.
     const options = {
       method: 'GET',
       credentials: 'omit',
@@ -2145,13 +2564,12 @@
       redirect: 'follow'
     };
     if (controller) options.signal = controller.signal;
-    const url = apiUrl + (apiUrl.indexOf('?') === -1 ? '?' : '&') + 'link=' + encodeURIComponent(code);
 
     let request;
     try {
       request = window.fetch(url, options);
     } catch (err) {
-      finish(id, null);
+      done(id, null);
       return;
     }
     request
@@ -2160,18 +2578,23 @@
         return response.json();  // rejects on a body that isn't JSON
       })
       .then(
-        function (body) { finish(id, readAnswer(body)); },
-        function () { finish(id, null); }  // network error, abort, bad status or bad JSON
+        function (body) { done(id, body); },
+        function () { done(id, null); }
       );
+  }
+
+  /** Marks the request in flight as finished. */
+  function endRequest() {
+    session.pending = 0;
+    window.clearTimeout(session.timer);
+    session.timer = 0;
+    session.controller = null;
   }
 
   /** Handles the end of request `id`: a good answer, or null for any failure. */
   function finish(id, answer) {
     if (id !== session.pending) return;  // stale, cancelled or already finished
-    session.pending = 0;
-    window.clearTimeout(session.timer);
-    session.timer = 0;
-    session.controller = null;
+    endRequest();
     session.answer = answer;  // stays null after a failure, so the next visit asks again
 
     // hashchange fires a moment after the URL changes, so check that the URL
@@ -2199,6 +2622,10 @@
     if (route.kind === 'none') {
       cancelRequest();
       showStart('');
+      return;
+    }
+    if (route.kind === 'featured') {
+      loadFeatured();
       return;
     }
     if (route.kind === 'invalid') {

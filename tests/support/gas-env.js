@@ -145,14 +145,17 @@ function createGasEnv(opts) {
 
   // ---------------------------------------------------------------- ContentService
   const ContentService = {
-    MimeType: { JSON: 'application/json' },
+    MimeType: { JSON: 'application/json', CSV: 'text/csv' },
     createTextOutput: (content) => {
       const output = {
         content: content,
         mimeType: null,
+        fileName: null,
         setMimeType: (type) => { output.mimeType = type; return output; },
+        downloadAsFile: (name) => { output.fileName = name; return output; },
         getContent: () => output.content,
-        getMimeType: () => output.mimeType
+        getMimeType: () => output.mimeType,
+        getFileName: () => output.fileName
       };
       return output;
     }

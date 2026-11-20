@@ -51,7 +51,7 @@ const cv = {
 
 /**
  * A raw FA item in Monday's shape. Every field optional.
- * f = {id, name, institution, email, responsible, status, statusChangedAt, type,
+ * f = {id, name, createdAt, institution, email, responsible, status, statusChangedAt, type,
  *      submitted, lockVerified, lockedAmount, testing, partyId, website, announcement,
  *      sendEmail, sendEmailChangedAt, faType, dvpStatus}
  */
@@ -74,7 +74,7 @@ function faItem(f) {
     cv.text('text_mm4kvrar', f.responsible)
   ];
   Object.keys(SENTINELS).forEach((id) => cols.push(cv.text(id, SENTINELS[id])));
-  return { id: String(f.id), name: f.name, column_values: cols };
+  return { id: String(f.id), name: f.name, created_at: f.createdAt || '2026-07-07T10:00:00Z', column_values: cols };
 }
 
 /** A raw DVP item. d = {id, name, status, submitted, finalApproval, requestUrl, requestText} */
@@ -82,6 +82,7 @@ function dvpItem(d) {
   return {
     id: String(d.id),
     name: d.name,
+    created_at: '2026-07-07T10:00:00Z',
     column_values: [
       cv.date('date_mm8dsx4y', d.submitted),
       cv.date('date_mm8dm7a0', d.finalApproval),
@@ -150,6 +151,7 @@ function pick(item, columnIds) {
   return {
     id: item.id,
     name: item.name,
+    created_at: item.created_at,
     column_values: item.column_values.filter((c) => ids.has(c.id)).map((c) => ({ id: c.id, type: c.type, text: c.text, value: c.value }))
   };
 }

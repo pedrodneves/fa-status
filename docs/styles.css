@@ -303,6 +303,25 @@ p, dl, dd { margin: 0; }
 
 .p-tools { display: inline-flex; align-items: center; gap: 12px; margin-left: auto; }
 
+/* "Check my application": a small yellow pill, on every screen without a private link. */
+.p-apply {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 18px;
+  border: 1px solid var(--band-accent);
+  border-radius: 999px;
+  background: var(--band-accent);
+  color: #030206;
+  font: 600 13px/1.2 var(--font-body);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.p-apply:hover { text-decoration: none; filter: brightness(.95); }
+.p-apply:focus-visible { outline: 2px solid var(--band-accent); outline-offset: 3px; }
+
 /* "Private link" badge, shown on pages opened with a private link. */
 .p-user {
   display: inline-flex;
@@ -579,7 +598,7 @@ p, dl, dd { margin: 0; }
 .tl .current .tl-title { color: var(--band-accent); font-weight: 600; }
 .tl .pill { gap: 6px; padding: 1px 8px; font-size: 11px; }
 
-/* ---- Progress bar (list cards, DVP cards, the example card) -------------- */
+/* ---- Progress bar (list cards, DVP cards) -------------------------------- */
 .progress { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
 .seg { height: 8px; border-radius: 999px; background: var(--line); }
 .seg.done { background: var(--accent); }
@@ -831,52 +850,59 @@ a.app:hover .app-name { text-decoration: underline; text-underline-offset: 3px; 
 .form-message { font-size: 14px; color: var(--band-bad); }
 .form-message:empty { display: none; }
 
-/* The sample status card next to the form (hidden on phones). */
-.example {
-  display: none;
-  flex: 1 1 360px;
-  max-width: 440px;
-  margin: 0 auto;
-  padding: 24px;
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, .35);
-}
-.example .eyebrow { color: var(--eyebrow); }
-.example-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.example-tag {
-  padding: 2px 8px;
-  border: 1px dashed var(--line);
-  border-radius: 6px;
-  font: 500 11px/1.4 var(--font-mono);
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-.example-name { font-size: 24px; line-height: 1.2; }
-.example-meta,
-.example-step { font-size: 14px; color: var(--muted); }
-.example-step strong { color: var(--ink); font-weight: 500; }
-.example-email { display: flex; gap: 12px; padding: 14px; border-radius: 12px; background: var(--surface-2); }
-.example-email .icon { width: 18px; height: 18px; margin-top: 3px; color: var(--accent); }
-.example-email-label { font-size: 12px; color: var(--muted); }
-.example-email-title { font-weight: 500; }
+/* ---- Start page: the board's front page (option B, 20 Nov 2026) ------------- */
+.hero-board-inner { gap: 20px; padding-top: 32px; padding-bottom: 104px; }
+.hero-board .p-h { font-size: 38px; line-height: 1.08; letter-spacing: -0.02em; }
+.board-search { display: flex; flex-wrap: wrap; gap: 10px; max-width: 760px; }
+.board-search .field { flex: 1 1 260px; height: 56px; padding: 0 22px; font-size: 17px; }
+.board-search .p-btn { min-height: 56px; }
+.hero-board .pub-stats { margin: 4px 0 0; }
 
-/* Three promises on the band's edge. */
-.promises { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
-.promise { gap: 8px; }
-.promise .icon { width: 22px; height: 22px; color: var(--accent); }
-.promise-title { font-weight: 600; }
+/* The card on the band's edge: recently featured apps and a button per status. */
+.board-preview { gap: 16px; padding: 24px; }
+.preview-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.preview-h { font-size: 22px; font-weight: 500; }
+.preview-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.preview-list { list-style: none; margin: 0; padding: 0; }
+.preview-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name status" "type since";
+  gap: 4px 16px;
+  align-items: center;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+.preview-type { grid-area: type; font-size: 15px; }
+.preview-status { grid-area: status; justify-self: end; }
+.preview-since { grid-area: since; justify-self: end; font-size: 14px; color: var(--muted); }
+
+/* The applicant panel beside how review works. */
+.start-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 40px; align-items: start; padding-top: 48px; }
+.apply-panel { gap: 14px; padding: 28px; border: 2px solid var(--accent); }
+.apply-top { display: flex; align-items: center; gap: 14px; }
+.apply-icon { display: grid; place-items: center; flex: none; width: 48px; height: 48px; border-radius: 14px; background: var(--info-soft); color: var(--info); }
+.apply-icon .icon { width: 24px; height: 24px; }
+.apply-h { font-size: 26px; font-weight: 500; line-height: 1.2; }
+.apply-panel .address { font-weight: 600; overflow-wrap: anywhere; }
+/* The email form off the band: page colours instead of the band's. */
+.apply-panel .field { border-color: var(--field-line); background: var(--field-bg); color: var(--ink); }
+.apply-panel .field::placeholder { color: var(--muted); }
+.apply-panel .field:focus-visible { outline-color: var(--accent); }
+.apply-panel .field[aria-invalid="true"] { border-color: var(--bad); }
+.apply-panel .form-message { color: var(--bad); }
+
+.how-block { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.how-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 18px; }
+.how-list li { display: flex; align-items: flex-start; gap: 16px; }
+.how-list .how-n { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--accent); border-radius: 50%; }
+.how-text { display: grid; gap: 2px; }
 
 /* Sections below: how review works, statuses, FAQ. */
 .info-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; padding-top: 64px; }
 .info-head { display: grid; gap: 10px; max-width: 640px; }
 .info-h { font-size: 28px; font-weight: 400; line-height: 1.2; letter-spacing: -0.01em; }
 
-.how-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
-.how-step { gap: 6px; box-shadow: none; }
 .how-n { font: 500 13px/1 var(--font-mono); letter-spacing: .08em; color: var(--accent); }
 .how-title { font-size: 18px; font-weight: 500; line-height: 1.3; }
 
@@ -912,9 +938,6 @@ a.app:hover .app-name { text-decoration: underline; text-underline-offset: 3px; 
 .faq-q { font-size: 17px; font-weight: 500; }
 .faq-list summary:hover .faq-q { text-decoration: underline; text-underline-offset: 3px; }
 .faq-a { max-width: 680px; padding-bottom: 18px; color: var(--muted); }
-
-/* Link to the public list, under the form on the band. */
-.hero-link { justify-self: start; font-size: 15px; }
 
 /* "View the public list" in the side card of a featured app. */
 .card-link { justify-self: start; font-size: 15px; }
@@ -1120,9 +1143,8 @@ a.app:hover .app-name { text-decoration: underline; text-underline-offset: 3px; 
   .field-row { grid-template-columns: minmax(0, 1fr) auto; }
   .email-form .p-btn { justify-self: start; }
 
-  .promises,
-  .how-steps,
   .glossary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hero-board .p-h { font-size: 52px; }
   .glossary li:nth-last-child(2):nth-child(odd) { border-bottom: 0; }
 }
 
@@ -1133,7 +1155,10 @@ a.app:hover .app-name { text-decoration: underline; text-underline-offset: 3px; 
   .tl li::before { left: 40px; right: 12px; top: 13px; bottom: auto; width: auto; height: 2px; }
   .tl .t { padding-top: 0; }
 
-  .example { display: grid; gap: 16px; }
+  /* The preview's rows: four columns. */
+  .preview-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "name type status since"; }
+  .preview-status,
+  .preview-since { justify-self: start; }
 
   /* The public list as a table: five columns under a header row. */
   .pub-head,
@@ -1145,8 +1170,7 @@ a.app:hover .app-name { text-decoration: underline; text-underline-offset: 3px; 
 }
 
 @media (min-width: 901px) {
-  .promises,
-  .how-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .start-split { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero-inner { padding-top: 24px; }
   .hero-start-inner { padding-top: 56px; padding-bottom: 112px; }
 }

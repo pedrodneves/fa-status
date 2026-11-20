@@ -84,19 +84,41 @@
       toLight: 'Switch to white theme'
     },
 
-    // ---- Start page and the email form --------------------------------------
+    // ---- Start page: the public board's front page, then the applicant panel
+    // (option B of the round-3 mockups, 20 Nov 2026).
     start: {
-      eyebrow: 'For Featured App applicants',
-      heading: 'Check your application status',
-      body: "Enter the email address on your Featured App application. We'll email you a private link to the status of your applications and DVP requests.",
+      eyebrow: 'Public record · Canton Network',
+      heading: 'Featured App board',
+      body: "Every Featured App application and where it stands, with the app's type and Party ID. Updated every 10 minutes.",
+      searchLabel: 'Search the board',
+      searchPlaceholder: 'Search by app name or Party ID',
+      searchPlaceholderCount: 'Search {count} applications by app name or Party ID',
+      searchButton: 'Search',
+      // The numbers in the band, once the board has loaded.
+      stats: { featured: 'Featured apps', assetMoving: 'Asset-moving', all: 'Applications' },
+      // The card on the band's edge: the latest featured apps and a button per status.
+      preview: {
+        heading: 'Recently featured',
+        open: 'Open the Featured App board →',
+        all: 'See all {count} applications →',
+        statusesLabel: 'Open the board at one status',
+        loading: 'Loading the board…',
+        failed: "We couldn't load the board just now. You can still open it, or check your own application below.",
+        rows: 5
+      },
+      // The applicant panel: the email form (the "sent" screen reuses the panel).
+      applyEyebrow: 'For applicants · private',
+      applyHeading: 'Applied for Featured App status?',
+      applyBody: "Enter the email address on your application. We'll email you a private link to where it stands, with its history and DVP requests.",
       label: 'Email address',
       placeholder: 'name@company.com',
       button: 'Email me my link',
       sending: 'Sending…',
       invalid: 'Enter one email address, like name@company.com.',
       failed: "We couldn't send your link just now. Please try again in a minute.",
-      fine: 'We only email addresses that are on a Featured App application. Questions? Contact the Featured App team at {email}.',
-      publicLink: 'See the Featured App board →'  // to the public board (#featured)
+      fine: 'We only email addresses that are on a Featured App application, and only people with your link can see it. Questions? Contact the Featured App team at {email}.',
+      headerButton: 'Check my application',  // in the header, on every screen without a private link
+      publicLink: 'See the Featured App board →'  // on the invalid-link screen
     },
     sent: {
       heading: 'Check your email',
@@ -105,26 +127,8 @@
       again: 'Use a different email'
     },
 
-    // ---- Below the form on the start, sent and invalid screens -------------
+    // ---- Lower down the start, sent and invalid screens ----------------------
     about: {
-      // The sample card next to the form (hidden from screen readers: it's decoration).
-      example: {
-        tag: 'Example',
-        eyebrow: 'Featured App application',
-        name: 'Your app',
-        meta: 'Your institution',
-        pill: 'In committee review',
-        step: 'Step 3 of 4',
-        stepName: 'Featured App Committee review',
-        email: 'Latest email from the committee',
-        emailTitle: 'Office hours invitation'
-      },
-      promisesLabel: 'About your status page',
-      promises: [
-        { icon: 'lock', title: 'Private to your email', text: 'Your link shows only the applications that list your address. No one else can find them.' },
-        { icon: 'refresh', title: 'Updated every 10 minutes', text: "The page reads the committee's own records, so changes show up soon after they're made." },
-        { icon: 'layers', title: 'Applications and DVP requests', text: 'Every application on your address, with the DVP / asset-moving requests that belong to it.' }
-      ],
       // Step titles come from fa.steps, so they always match the timeline.
       how: {
         eyebrow: 'How review works',
@@ -174,6 +178,7 @@
     // ---- Screens without application data ----------------------------------
     loading: 'Loading your applications…',
     invalid: {
+      eyebrow: 'For Featured App applicants',
       heading: "This link isn't valid",
       body: 'Only part of it may have been copied. Enter your email address to get your link again.'
     },
@@ -666,8 +671,6 @@
   // Stroke icons (24 x 24 viewBox), drawn with currentColor by the .icon class.
   const ICONS = {
     lock: ['M7 11h10a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z', 'M8 11V7a4 4 0 0 1 8 0v4'],
-    refresh: ['M21 12a9 9 0 1 1-2.6-6.4', 'M21 4v5h-5'],
-    layers: ['m12 3 9 5-9 5-9-5 9-5z', 'm3 13 9 5 9-5'],
     mail: ['M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z', 'm3 7 9 6 9-6'],
     arrow: ['M5 12h14', 'm13 6 6 6-6 6'],
     copy: ['M11 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z', 'M5 15V5a2 2 0 0 1 2-2h10'],
@@ -696,8 +699,18 @@
   let warnedAboutConfig = false;
   let sending = false;  // the email form is waiting for Apps Script
 
+  // The public board, kept for BOARD_FRESH_MS once loaded, so the start page
+  // and #featured share one request. Only a good answer is kept.
+  const BOARD_FRESH_MS = 5 * 60 * 1000;
+  const board = { list: null, at: 0 };
+  // What the start page asked #featured to open with: a search, or one status.
+  let boardRequest = { query: '', only: '' };
+  // "Check my application" was pressed on another screen: focus the form once the start page shows.
+  let applyWanted = false;
+
   const main = document.querySelector('main');
   const privateBadge = document.querySelector('[data-private-link]');
+  const applyButton = document.querySelector('[data-apply-button]');
 
   // ===========================================================================
   // 4. Pure helpers (parseRoute and formatDate are exposed for tests)
@@ -1320,6 +1333,7 @@
     append(main, content);
 
     if (privateBadge) privateBadge.hidden = PRIVATE_SCREENS.indexOf(screen) === -1;
+    if (applyButton) applyButton.hidden = PRIVATE_SCREENS.indexOf(screen) !== -1;
     document.title = title ? title + TEXT.separator + TEXT.siteName : TEXT.siteName;
 
     window.scrollTo(0, 0);
@@ -1341,79 +1355,211 @@
     ]);
   }
 
-  // ---- Start, sent and invalid: the band with the form, then what the page is
+  // ---- Start, sent and invalid
 
   /**
-   * The layout shared by the start, sent and invalid screens: the band with
-   * `heroMain` and the example card, then the promises, how review works,
-   * the statuses and the FAQ.
+   * The start and sent screens: the band is the public board's front page
+   * (search and numbers), a card on its edge shows the latest featured apps
+   * and a button per status, then the applicant panel (`panel`: the email
+   * form, or "check your email") beside how review works, then the statuses
+   * and the FAQ. The board comes from one GET (?view=featured), reused by
+   * #featured for a few minutes (withBoard).
    */
-  function startLayout(screen, heroMain) {
-    const publicLink = el('a', { class: 'hero-link', href: '#' + FEATURED_ROUTE, text: TEXT.start.publicLink });
+  function boardStart(screen, panel) {
+    const w = TEXT.start;
+    const searchInput = el('input', {
+      id: 'board-search', class: 'field', type: 'search', autocomplete: 'off', spellcheck: 'false', placeholder: w.searchPlaceholder
+    });
+    const search = el('form', { class: 'board-search', role: 'search', novalidate: true }, [
+      el('label', { class: 'visually-hidden', for: 'board-search', text: w.searchLabel }),
+      searchInput,
+      el('button', { class: 'p-btn', type: 'submit', text: w.searchButton })
+    ]);
+    search.addEventListener('submit', function (event) {
+      event.preventDefault();
+      openBoard({ query: searchInput.value.trim() });
+    });
+    const stats = el('dl', { class: 'pub-stats', hidden: true });
+    const preview = boardPreview();
+
     show(screen, null, [
-      hero([el('div', { class: 'hero-main' }, heroMain.concat(publicLink)), exampleCard()], 'hero-start'),
-      promisesSection(),
-      howSection(),
+      hero([heroHead(w.eyebrow, w.heading, w.body), search, stats], 'hero-board'),
+      el('div', { class: 'wrap overlap' }, preview.card),
+      el('div', { class: 'wrap start-split' }, [panel, howBlock()]),
       statusesSection(),
       faqSection()
     ]);
+
+    withBoard(function (list) {
+      if (!preview.card.isConnected) return;  // the visitor moved on
+      fillPreview(preview, list);
+      if (!list) return;
+      const apps = boardApps(list);
+      const featured = apps.filter(function (app) { return app.status === 'featured' || app.status === 'provisional'; });
+      const assetMoving = featured.filter(function (app) { return textOf(app.type) === TEXT.featured.assetMovingType; }).length;
+      append(stats, [
+        { label: w.stats.featured, value: featured.length },
+        { label: w.stats.assetMoving, value: assetMoving },
+        { label: w.stats.all, value: apps.length }
+      ].map(function (s) {
+        return el('div', { class: 'pub-stat' }, [el('dt', { text: s.label }), el('dd', { text: String(s.value) })]);
+      }));
+      stats.hidden = false;
+      searchInput.setAttribute('placeholder', fillText(w.searchPlaceholderCount, { count: String(apps.length) }));
+    });
   }
 
-  /** The start page: what this is, and the email form. */
-  function showStart(prefill) {
-    startLayout('start', [
-      heroHead(TEXT.start.eyebrow, TEXT.start.heading, TEXT.start.body),
-      emailForm(prefill),
-      el('p', { class: 'p-fine' }, fill(TEXT.start.fine, { email: emailLink() }))
+  /** The card on the band's edge: "Recently featured", filled by fillPreview once the board loads. */
+  function boardPreview() {
+    const w = TEXT.start.preview;
+    const all = el('a', { class: 'p-btn secondary', href: '#' + FEATURED_ROUTE, text: w.open });
+    const body = el('div', { class: 'preview-body' }, el('p', { class: 'p-fine', role: 'status', text: w.loading }));
+    const card = el('section', { class: 'card board-preview', 'data-section': 'board-preview', 'aria-labelledby': 'preview-h' }, [
+      el('div', { class: 'preview-top' }, [el('h2', { class: 'preview-h', id: 'preview-h', text: w.heading }), all]),
+      body
+    ]);
+    return { card: card, all: all, body: body };
+  }
+
+  /** The preview's buttons per status and its latest featured apps; a short note when the board didn't load. */
+  function fillPreview(preview, list) {
+    const w = TEXT.start.preview;
+    const f = TEXT.featured;
+    preview.body.textContent = '';
+    if (!list) {
+      append(preview.body, el('p', { class: 'p-fine', text: w.failed }));
+      return;
+    }
+    const apps = boardApps(list);
+    preview.all.textContent = fillText(w.all, { count: String(apps.length) });
+    const counts = {};
+    apps.forEach(function (app) { counts[app.status] = (counts[app.status] || 0) + 1; });
+    const buttons = f.statusOrder.filter(function (key) { return counts[key]; }).map(function (key) {
+      const button = el('button', { class: 'filter', type: 'button', 'data-status': key }, [
+        f.status[key].label, ' ', el('span', { class: 'filter-count', text: String(counts[key]) })
+      ]);
+      button.addEventListener('click', function () { openBoard({ only: key }); });
+      return button;
+    });
+    // The board lists featured apps first, the most recently featured first.
+    const recent = apps.filter(function (app) { return app.status === 'featured'; }).slice(0, w.rows);
+    append(preview.body, [
+      buttons.length ? el('div', { class: 'filters', role: 'group', 'aria-label': w.statusesLabel }, buttons) : null,
+      recent.length ? el('ul', { class: 'preview-list' }, recent.map(previewRow)) : el('p', { class: 'p-fine', text: f.none })
     ]);
   }
 
-  /** After the form: "check your email". The answer never says whether the address applied. */
+  /** One featured app in the preview: name, type, status, the date it was featured. */
+  function previewRow(app) {
+    const f = TEXT.featured;
+    const words = f.status[app.status];
+    const type = textOf(app.type);
+    const date = formatDate(app.since);
+    const since = date && app.sinceExact === false ? fillText(f.sinceBy, { date: date }) : date;
+    const label = function (text) { return el('span', { class: 'visually-hidden', text: text + ': ' }); };
+    return el('li', { class: 'preview-row' }, [
+      el('span', { class: 'pub-name', text: textOf(app.name) || TEXT.fa.untitled }),
+      el('span', { class: 'preview-type' + (type ? '' : ' muted') }, [label(f.columns.type), type || f.typeNotSet]),
+      el('span', { class: 'preview-status' }, [label(f.columns.status), pill(words.label, words.tone)]),
+      el('span', { class: 'preview-since' }, [label(words.since), since || '—'])
+    ]);
+  }
+
+  /** The applicant panel: a lock, the eyebrow, `heading` (focus target), `body`, then `content`. */
+  function applyPanel(heading, body, content) {
+    return el('section', { class: 'card apply-panel', id: 'apply', 'data-section': 'apply', 'aria-labelledby': 'apply-h' }, [
+      el('div', { class: 'apply-top' }, [
+        el('span', { class: 'apply-icon' }, icon('lock')),
+        el('p', { class: 'eyebrow', text: TEXT.start.applyEyebrow })
+      ]),
+      el('h2', { class: 'apply-h', id: 'apply-h', tabindex: '-1', text: heading }),
+      el('p', { class: 'p-sub' }, body),
+      content
+    ]);
+  }
+
+  /** The start page: the board's front page, and the email form in the applicant panel. */
+  function showStart(prefill) {
+    const w = TEXT.start;
+    boardStart('start', applyPanel(w.applyHeading, w.applyBody, [
+      emailForm(prefill),
+      el('p', { class: 'p-fine' }, fill(w.fine, { email: emailLink() }))
+    ]));
+    if (applyWanted) {
+      applyWanted = false;
+      focusApply();
+    }
+  }
+
+  /** After the form: "check your email" in the panel. The answer never says whether the address applied. */
   function showSent(address) {
     // A bad token in the URL has done its job; drop it so a reload shows the start page.
     if (window.location.hash && window.history && window.history.replaceState) {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
     const again = el('button', { class: 'p-btn secondary', type: 'button', 'data-action': 'again', text: TEXT.sent.again });
-    again.addEventListener('click', function () { showStart(''); });
-    startLayout('sent', [
-      heroHead(TEXT.start.eyebrow, TEXT.sent.heading,
-        fill(TEXT.sent.body, { address: el('strong', { class: 'address', text: address }) })),
-      el('p', { class: 'p-fine' }, fill(TEXT.sent.noEmail, { email: emailLink() })),
-      again
-    ]);
+    again.addEventListener('click', function () {
+      showStart('');
+      focusApply();
+    });
+    boardStart('sent', applyPanel(TEXT.sent.heading,
+      fill(TEXT.sent.body, { address: el('strong', { class: 'address', text: address }) }), [
+        el('p', { class: 'p-fine' }, fill(TEXT.sent.noEmail, { email: emailLink() })),
+        again
+      ]));
+    focusApply();
   }
 
   /** A link that doesn't work: say so, and offer the email form. */
   function showInvalid() {
-    startLayout('invalid', [
-      heroHead(TEXT.start.eyebrow, TEXT.invalid.heading, TEXT.invalid.body),
-      emailForm(''),
-      el('p', { class: 'p-fine' }, fill(TEXT.start.fine, { email: emailLink() }))
+    const w = TEXT.invalid;
+    show('invalid', null, [
+      hero(el('div', { class: 'hero-main' }, [
+        heroHead(w.eyebrow, w.heading, w.body),
+        emailForm(''),
+        el('p', { class: 'p-fine' }, fill(TEXT.start.fine, { email: emailLink() })),
+        el('a', { class: 'p-btn secondary', href: '#' + FEATURED_ROUTE, text: TEXT.start.publicLink })
+      ]), 'hero-start'),
+      el('div', { class: 'wrap info-section' }, howBlock()),
+      statusesSection(),
+      faqSection()
     ]);
   }
 
-  /** The sample status card next to the form. Decoration: hidden from screen readers. */
-  function exampleCard() {
-    const x = TEXT.about.example;
-    return el('div', { class: 'example', 'aria-hidden': 'true' }, [
-      el('div', { class: 'example-top' }, [
-        el('span', { class: 'eyebrow', text: x.eyebrow }),
-        el('span', { class: 'example-tag', text: x.tag })
-      ]),
-      el('p', { class: 'example-name', text: x.name }),
-      el('p', { class: 'example-meta', text: x.meta }),
-      pill(x.pill, 'info'),
-      progressBar(['done', 'done', 'current', 'todo']),
-      el('p', { class: 'example-step' }, [el('strong', { text: x.step }), TEXT.separator + x.stepName]),
-      el('div', { class: 'example-email' }, [
-        icon('mail'),
-        el('div', null, [
-          el('p', { class: 'example-email-label', text: x.email }),
-          el('p', { class: 'example-email-title', text: x.emailTitle })
-        ])
-      ])
-    ]);
+  /**
+   * Brings the email form into view: its field when there is one, else the
+   * panel's heading (after sending). Used by "Check my application".
+   */
+  function focusApply() {
+    const target = main.querySelector('#email') || main.querySelector('#apply-h');
+    if (!target) return;
+    if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'center' });
+    try {
+      target.focus({ preventScroll: true });
+    } catch (err) {
+      target.focus();
+    }
+  }
+
+  /**
+   * "Check my application" (header, board page): the form on the start
+   * screens, or the start page with the form focused from anywhere else.
+   */
+  function goApply() {
+    const screen = main.getAttribute('data-screen');
+    if (screen === 'start' || screen === 'sent' || screen === 'invalid') {
+      focusApply();
+      return;
+    }
+    applyWanted = true;
+    if (parseRoute(window.location.hash).kind === 'none') handleRoute();
+    else window.location.hash = '';
+  }
+
+  /** Opens #featured with a search (`query`) or only one status (`only`) shown. */
+  function openBoard(request) {
+    boardRequest = { query: request.query || '', only: request.only || '' };
+    window.location.hash = FEATURED_ROUTE;
   }
 
   /** Eyebrow, h2 and an optional intro, at the top of a start-page section. */
@@ -1425,28 +1571,20 @@
     ]);
   }
 
-  /** Three cards on the edge of the band: private, current, complete. */
-  function promisesSection() {
-    return el('section', { class: 'wrap overlap', 'aria-label': TEXT.about.promisesLabel },
-      el('ul', { class: 'promises' }, TEXT.about.promises.map(function (p) {
-        return el('li', { class: 'card promise' }, [
-          icon(p.icon),
-          el('p', { class: 'promise-title', text: p.title }),
-          el('p', { class: 'p-fine', text: p.text })
-        ]);
-      })));
-  }
-
-  /** "How review works": the timeline steps, explained. */
-  function howSection() {
+  /** "How review works": the timeline steps as a numbered list. */
+  function howBlock() {
     const how = TEXT.about.how;
-    return el('section', { class: 'wrap info-section', 'data-section': 'how' }, [
-      infoHead(how, how.intro),
-      el('ol', { class: 'how-steps' }, how.steps.map(function (s, i) {
-        return el('li', { class: 'card how-step' }, [
-          el('span', { class: 'how-n', text: (i < 9 ? '0' : '') + (i + 1) }),
-          el('span', { class: 'how-title', text: TEXT.fa.steps[s.key] }),
-          el('span', { class: 'p-fine', text: s.text })
+    return el('section', { class: 'how-block', 'data-section': 'how', 'aria-labelledby': 'how-h' }, [
+      el('p', { class: 'eyebrow', text: how.eyebrow }),
+      el('h2', { class: 'info-h', id: 'how-h', text: how.heading }),
+      el('p', { class: 'p-fine', text: how.intro }),
+      el('ol', { class: 'how-list' }, how.steps.map(function (s, i) {
+        return el('li', null, [
+          el('span', { class: 'how-n', 'aria-hidden': 'true', text: String(i + 1) }),
+          el('span', { class: 'how-text' }, [
+            el('span', { class: 'how-title', text: TEXT.fa.steps[s.key] }),
+            el('span', { class: 'p-fine', text: s.text })
+          ])
         ]);
       }))
     ]);
@@ -2030,9 +2168,11 @@
    */
   function showFeatured(list, apiUrl) {
     const w = TEXT.featured;
-    const apps = list.apps.filter(function (app) { return hasOwn(w.status, app.status); });
+    const apps = boardApps(list);
     const filters = featuredFilters(apps);
-    const state = { filter: filters[0], query: '', hidden: {} };
+    const asked = boardRequest;  // from the start page's search or status buttons, once
+    boardRequest = { query: '', only: '' };
+    const state = { filter: filters[0], query: asked.query, hidden: {} };
     const ofStatus = function (key) { return apps.filter(function (app) { return app.status === key; }); };
 
     const tables = w.statusOrder.filter(function (key) { return ofStatus(key).length; }).map(function (key) {
@@ -2049,6 +2189,10 @@
       ]);
       return { key: key, apps: ofStatus(key), rows: rows, count: count, section: section };
     });
+
+    if (asked.only && tables.some(function (table) { return table.key === asked.only; })) {
+      tables.forEach(function (table) { if (table.key !== asked.only) state.hidden[table.key] = true; });
+    }
 
     const foot = el('p', { class: 'pub-foot', 'aria-live': 'polite' });
     const empty = el('p', { class: 'card pub-empty' });
@@ -2081,11 +2225,12 @@
     const search = el('input', {
       id: 'pub-search', class: 'pub-input', type: 'search', autocomplete: 'off', spellcheck: 'false', placeholder: w.searchPlaceholder
     });
+    search.value = state.query;
     search.addEventListener('input', function () { state.query = search.value; render(); });
 
     // Status toggles: each shows or hides its table (several can be on).
     const toggles = tables.map(function (table) {
-      const button = el('button', { class: 'filter', type: 'button', 'aria-pressed': 'true', 'data-status': table.key }, [
+      const button = el('button', { class: 'filter', type: 'button', 'aria-pressed': String(!state.hidden[table.key]), 'data-status': table.key }, [
         w.status[table.key].label, ' ', el('span', { class: 'filter-count', text: String(table.apps.length) })
       ]);
       button.addEventListener('click', function () {
@@ -2124,7 +2269,7 @@
 
     show('featured', w.title, [
       hero([
-        el('a', { class: 'back', href: '#', text: w.back }),
+        el('a', { class: 'back', href: '#', 'data-apply': '', text: w.back }),
         el('div', { class: 'pub-hero' }, [
           heroHead(w.eyebrow, w.heading, w.intro),
           el('dl', { class: 'pub-stats' }, stats.map(function (s) {
@@ -2167,7 +2312,7 @@
         el('section', { class: 'card pub-about', 'data-section': 'about' }, [
           el('h2', { class: 'card-h', text: w.about.heading }),
           w.about.items.map(function (text) { return el('p', { class: 'p-fine', text: text }); }),
-          el('p', { class: 'p-fine' }, fill(w.about.apply, { link: el('a', { href: '#', text: w.about.applyLink }) }))
+          el('p', { class: 'p-fine' }, fill(w.about.apply, { link: el('a', { href: '#', 'data-apply': '', text: w.about.applyLink }) }))
         ])
       ])
     ]);
@@ -2244,8 +2389,13 @@
 
   /** Reads the public board's JSON body: { updated, apps }, or null for anything unusable. */
   function readFeatured(body) {
-    if (!isObject(body) || body.error || !Array.isArray(body.apps)) return null;
+    if (!isObject(body) || body.error || !Array.isArray(body.apps) || typeof body.updated !== 'string') return null;
     return { updated: textOf(body.updated), apps: body.apps.filter(isObject) };
+  }
+
+  /** The board's applications whose status the page knows. */
+  function boardApps(list) {
+    return list.apps.filter(function (app) { return hasOwn(TEXT.featured.status, app.status); });
   }
 
   // ---- Footer
@@ -2495,15 +2645,62 @@
       showError(TEXT.featured.error);
       return;
     }
+    const kept = keptBoard();
+    if (kept) {
+      showFeatured(kept, apiUrl);
+      return;
+    }
     showLoading(TEXT.featured.loading);
-    startGet(apiUrl + (apiUrl.indexOf('?') === -1 ? '?' : '&') + 'view=featured', function (id, body) {
+    startGet(boardUrl(apiUrl), function (id, body) {
       if (id !== session.pending) return;  // stale, cancelled or already finished
       endRequest();
       if (parseRoute(window.location.hash).kind !== 'featured') return;  // the visitor moved on
-      const list = readFeatured(body);
+      const list = keepBoard(readFeatured(body));
       if (list) showFeatured(list, apiUrl);
       else showError(TEXT.featured.error);
     });
+  }
+
+  /**
+   * The board for the start page: the one kept from a recent request, or a
+   * new GET. `done(list)` gets { updated, apps }, or null when it can't be had.
+   */
+  function withBoard(done) {
+    const kept = keptBoard();
+    if (kept) {
+      done(kept);
+      return;
+    }
+    const apiUrl = configuredApiUrl();
+    if (!apiUrl) {
+      done(null);
+      return;
+    }
+    cancelRequest();
+    startGet(boardUrl(apiUrl), function (id, body) {
+      if (id !== session.pending) return;  // stale, cancelled or already finished
+      endRequest();
+      done(keepBoard(readFeatured(body)));
+    });
+  }
+
+  /** The board's address: the web app with ?view=featured. */
+  function boardUrl(apiUrl) {
+    return apiUrl + (apiUrl.indexOf('?') === -1 ? '?' : '&') + 'view=featured';
+  }
+
+  /** The board kept from a request less than BOARD_FRESH_MS ago, or null. */
+  function keptBoard() {
+    return board.list && Date.now() - board.at < BOARD_FRESH_MS ? board.list : null;
+  }
+
+  /** Keeps a good board (null is not kept) and returns it. */
+  function keepBoard(list) {
+    if (list) {
+      board.list = list;
+      board.at = Date.now();
+    }
+    return list;
   }
 
   /**
@@ -2670,6 +2867,14 @@
 
   if (!main) return;
   renderFooter();
+  if (applyButton) applyButton.textContent = TEXT.start.headerButton;
+  // "Check my application": the header button and the board page's links.
+  document.addEventListener('click', function (event) {
+    const target = event.target && event.target.closest ? event.target.closest('[data-apply]') : null;
+    if (!target) return;
+    event.preventDefault();
+    goApply();
+  });
   window.addEventListener('hashchange', handleRoute);
   handleRoute();
 })();

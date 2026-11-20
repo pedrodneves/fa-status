@@ -73,14 +73,70 @@ const screen = (page, name) => page.locator('main[data-screen="' + name + '"]');
 
 // ------------------------------------------------------------------ the start page and the email form
 
-test('start page: the email form, no request until it is sent', async ({ page }, testInfo) => {
-  const requests = await mockApi(page, { found: false });
+test('start page: the board\'s front page, recently featured, the applicant panel; one GET for the board', async ({ page }, testInfo) => {
+  const requests = await mockApi(page, featuredList());
   await page.goto('/');
-  await expect(screen(page, 'start').locator('h1')).toHaveText('Check your application status');
+  await expect(screen(page, 'start').locator('h1')).toHaveText('Featured App board');
+  await expect(page.locator('.hero-board .pub-stat dt')).toHaveText(['Featured apps', 'Asset-moving', 'Applications']);
+  await expect(page.locator('.hero-board .pub-stat dd')).toHaveText(['5', '2', '10']);
+  await expect(page.getByLabel('Search the board')).toHaveAttribute('placeholder', 'Search 10 applications by app name or Party ID');
+  const preview = page.locator('[data-section="board-preview"]');
+  await expect(preview.locator('h2')).toHaveText('Recently featured');
+  await expect(preview.locator('a.p-btn')).toHaveText('See all 10 applications →');
+  await expect(preview.locator('.filter')).toHaveText(['Featured 4', 'Provisional 1', 'In review 1', 'Not approved 1', 'Revoked 2', 'Withdrawn 1']);
+  await expect(preview.locator('.pub-name')).toHaveText(['Harbor Swap', 'Lumen Wallet', 'Quarry Bonds', 'Orchard Analytics']);
+  await expect(preview.locator('.preview-row').last()).toContainText('By 7 Jul 2026');
+  await expect(page.locator('[data-section="apply"] h2')).toHaveText('Applied for Featured App status?');
   await expect(page.getByLabel('Email address')).toBeVisible();
+  await expect(page.locator('[data-apply-button]')).toHaveText('Check my application');
   await expect(page.locator('[data-private-link]')).toBeHidden();
-  expect(requests).toHaveLength(0);
+  expect(requests).toHaveLength(1);
+  expect(requests[0].method()).toBe('GET');
+  expect(new URL(requests[0].url()).searchParams.get('view')).toBe('featured');
   await shot(page, 'start', testInfo);
+});
+
+test('start page: the search and the status buttons open the board there, without asking again', async ({ page }) => {
+  const requests = await mockApi(page, featuredList());
+  await page.goto('/');
+  await expect(page.locator('[data-section="board-preview"] .filter')).toHaveCount(6);
+  await page.getByLabel('Search the board').fill('orbit');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(screen(page, 'featured')).toBeVisible();
+  await expect(page.getByLabel('Search by app name or Party ID')).toHaveValue('orbit');
+  await expect(page.locator('.pub-name')).toHaveText(['Orbit Ledger']);
+
+  await page.evaluate(() => { location.hash = ''; });
+  await expect(screen(page, 'start')).toBeVisible();
+  await page.locator('[data-section="board-preview"] .filter[data-status="revoked"]').click();
+  await expect(screen(page, 'featured')).toBeVisible();
+  await expect(page.locator('[data-section="status"]:visible h2')).toHaveText(['Featured status revoked 2']);
+  await expect(page.locator('[data-toggles="status"] .filter[data-status="featured"]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('[data-toggles="status"] .filter[data-status="revoked"]')).toHaveAttribute('aria-pressed', 'true');
+  expect(requests).toHaveLength(1);
+});
+
+test('start page: when the board can\'t load, the preview says so and the form still works', async ({ page }) => {
+  await mockApi(page, { error: 'unavailable' });
+  await page.goto('/');
+  await expect(page.locator('[data-section="board-preview"]')).toContainText("We couldn't load the board just now");
+  await expect(page.locator('[data-section="board-preview"] a.p-btn')).toHaveText('Open the Featured App board →');
+  await expect(page.locator('.hero-board .pub-stats')).toBeHidden();
+  await page.getByLabel('Email address').fill('alice@harbor.example');
+  await page.getByRole('button', { name: 'Email me my link' }).click();
+  await expect(screen(page, 'sent')).toBeVisible();
+});
+
+test('"Check my application" in the header brings up the email form from any screen', async ({ page }) => {
+  await mockApi(page, featuredList());
+  await page.goto('/#featured');
+  await expect(screen(page, 'featured')).toBeVisible();
+  await page.locator('[data-apply-button]').click();
+  await expect(screen(page, 'start')).toBeVisible();
+  await expect(page.getByLabel('Email address')).toBeFocused();
+  await page.getByLabel('Search the board').focus();
+  await page.locator('[data-apply-button]').click();
+  await expect(page.getByLabel('Email address')).toBeFocused();
 });
 
 test('the form refuses something that is not one address, without a request', async ({ page }) => {
@@ -92,7 +148,7 @@ test('the form refuses something that is not one address, without a request', as
     await expect(page.locator('.form-message')).toHaveText('Enter one email address, like name@company.com.');
     await expect(page.getByLabel('Email address')).toHaveAttribute('aria-invalid', 'true');
   }
-  expect(requests).toHaveLength(0);
+  expect(requests.filter((r) => r.method() === 'POST')).toHaveLength(0);
 });
 
 test('sending the form: one POST with a text/plain JSON body, then "check your email"', async ({ page }, testInfo) => {
@@ -101,11 +157,12 @@ test('sending the form: one POST with a text/plain JSON body, then "check your e
   await page.getByLabel('Email address').fill('  alice@harbor.example ');
   await page.getByRole('button', { name: 'Email me my link' }).click();
   await expect(page.getByRole('button', { name: 'Sending…' })).toBeDisabled();
-  await expect(screen(page, 'sent').locator('h1')).toHaveText('Check your email');
+  await expect(screen(page, 'sent').locator('#apply-h')).toHaveText('Check your email');
+  await expect(page.locator('#apply-h')).toBeFocused();
   await expect(page.locator('.address')).toHaveText('alice@harbor.example');
-  expect(requests).toHaveLength(1);
-  const req = requests[0];
-  expect(req.method()).toBe('POST');
+  const posts = requests.filter((r) => r.method() === 'POST');
+  expect(posts).toHaveLength(1);
+  const req = posts[0];
   expect(JSON.parse(req.postData() || '')).toEqual({ email: 'alice@harbor.example' });
   const headers = req.headers();
   expect(headers['content-type']).toMatch(/^text\/plain/);
@@ -115,6 +172,7 @@ test('sending the form: one POST with a text/plain JSON body, then "check your e
   await page.getByRole('button', { name: 'Use a different email' }).click();
   await expect(screen(page, 'start')).toBeVisible();
   await expect(page.getByLabel('Email address')).toHaveValue('');
+  await expect(page.getByLabel('Email address')).toBeFocused();
 });
 
 test('the form: a failure or invalid_email keeps the form with a message, and it can be sent again', async ({ page }) => {
@@ -245,6 +303,7 @@ test('in review page: pill, four-step timeline, on file, DVP list, private-link 
   await expect(page.locator('a.app[data-dvp-id]')).toHaveCount(1);
   await expect(page.locator('a.app[data-dvp-id]')).toHaveAttribute('href', '#' + TOKEN + '/dvp-13557857392');
   await expect(page.locator('[data-private-link]')).toBeVisible();
+  await expect(page.locator('[data-apply-button]')).toBeHidden();
   await expect(page).toHaveTitle('Harbor Swap · Featured App Status');
   await expect(page.locator('main h1')).toBeFocused();
   await shot(page, 'app-in-review', testInfo);
@@ -521,10 +580,11 @@ test('the start page and the footer link to the public board, and its back link 
   await mockApi(page, featuredList());
   await page.goto('/');
   await expect(page.locator('footer a[href="#featured"]')).toHaveText('Featured App board');
-  await page.getByRole('link', { name: 'See the Featured App board →' }).click();
+  await page.getByRole('link', { name: 'See all 10 applications →' }).click();
   await expect(screen(page, 'featured')).toBeVisible();
   await page.getByRole('link', { name: '← Check your own application' }).click();
   await expect(screen(page, 'start')).toBeVisible();
+  await expect(page.getByLabel('Email address')).toBeFocused();
 });
 
 test('list: provisional apps count as approved', async ({ page }) => {
@@ -611,7 +671,6 @@ test('start page: how review works, every status, the FAQ, and the footer links'
   await expect(page.locator('[data-section="faq"]')).toContainText('Is anything about my application public?');
   await page.getByText("I didn't get an email").click();
   await expect(page.locator('[data-section="faq"] details').first()).toHaveAttribute('open', '');
-  await expect(page.locator('.example')).toHaveAttribute('aria-hidden', 'true');
   const footer = page.locator('footer[data-footer]');
   await expect(footer.locator('a[href="https://canton.foundation/featured-app-request/"]')).toHaveCount(1);
   await expect(footer.locator('a[href="mailto:ops@canton.foundation"]')).toHaveCount(1);

@@ -368,12 +368,12 @@ test('"2b-Provisional" (if the committee adds it) is provisional, and its announ
   assert.equal(appsOf(env, 'dev@orbit.example')[0].announcement, null, 'not approved: no announcement');
 });
 
-test('public list: apps with Featured App status, newest first, then revoked ones, with only the public fields', () => {
+test('public board: every application, by status then newest first, with only the public fields', () => {
   const { env } = setupEnv(publicFixture());
   const stats = env.call('refresh');
-  assert.equal(stats.featured, 3);
-  assert.equal(stats.revoked, 1);
-  assert.equal(stats.partyIdUnreadable, 1);
+  assert.equal(stats.listed, 9);
+  assert.equal(stats.featured, 3, 'featured and provisional');
+  assert.equal(stats.partyIdUnreadable, 2);
 
   const out = env.call('doGet', { parameter: { view: 'featured' } });
   assert.equal(out.getMimeType(), 'application/json');
@@ -381,34 +381,44 @@ test('public list: apps with Featured App status, newest first, then revoked one
   assert.deepEqual(Object.keys(body), ['updated', 'apps']);
   assert.match(body.updated, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
   body.apps.forEach((app) => assert.deepEqual(Object.keys(app), PUBLIC_KEYS));
+  const imported = { since: '2026-07-07', sinceExact: false, partyIds: [], record: null };
   assert.deepEqual(body.apps, [
-    { name: 'Tidepool DEX', type: 'Basic Featured App', status: 'provisional', since: '2026-11-14', sinceExact: true, partyIds: [], record: 'https://lists.example/tidepool' },
     { name: 'Harbor Vault', type: 'Featured Asset-Moving App', status: 'featured', since: '2026-11-13', sinceExact: true, partyIds: [PID_A], record: 'https://lists.example/vault' },
     { name: 'Lumen Wallet', type: null, status: 'featured', since: '2026-07-07', sinceExact: false, partyIds: [PID_B, PID_C], record: null },
+    { name: 'Tidepool DEX', type: 'Basic Featured App', status: 'provisional', since: '2026-11-14', sinceExact: true, partyIds: [], record: 'https://lists.example/tidepool' },
+    // Not approved yet: no announcement, although its FA Link is filled in.
+    { name: 'Harbor Swap', type: 'Basic Featured App', status: 'with_tokenomics', since: '2026-10-20', sinceExact: true, partyIds: [], record: null },
+    Object.assign({ name: 'Lumen Pay', type: null, status: 'in_review' }, imported), // an unknown label counts as in review
+    Object.assign({ name: 'No Contact App', type: null, status: 'in_review' }, imported),
+    Object.assign({ name: 'Quillpoint Vaults', type: null, status: 'in_review' }, imported),
+    Object.assign({ name: 'Orbit Ledger', type: null, status: 'not_approved' }, imported),
     { name: 'Copper Bridge', type: 'Featured Asset', status: 'revoked', since: '2026-11-18', sinceExact: true, partyIds: [PID_D], record: 'https://lists.example/copper' }
   ]);
 
-  // Nothing private: no address, institution, sentinel, or anything not on the list.
+  // Nothing private: no address, institution, sentinel, malformed Party ID or unapproved announcement.
   const text = JSON.stringify(body).toLowerCase();
-  ['@', 'harbor labs', 'lumen labs', 'larkspur', 'copperfield', 'orbit', 'quillpoint', 'see our docs', 'sentinel', 'javascript'].forEach((s) => assert.ok(text.indexOf(s) === -1, s));
+  ['@', 'harbor labs', 'lumen labs', 'larkspur', 'copperfield', 'orbit inc', 'ghost co', 'quillpoint"', 'see our docs',
+    'harbor::1220abcd', 'announce/1', 'sentinel', 'javascript'].forEach((s) => assert.ok(text.indexOf(s) === -1, s));
 });
 
-test('public list as CSV: one line per app, quoted where needed, never a spreadsheet formula', () => {
+test('public board as CSV: one line per application, quoted where needed, never a spreadsheet formula', () => {
   const data = publicFixture();
   data.fa.push(faItem({ id: 109, name: '=HYPERLINK("https://evil.example","Win, now")', status: '2-Approved', statusChangedAt: '2026-01-02T00:00:00Z' }));
   const { env } = setupEnv(data);
   env.call('refresh');
   const out = env.call('doGet', { parameter: { view: 'featured', format: 'csv' } });
   assert.equal(out.getMimeType(), 'text/csv');
-  assert.equal(out.getFileName(), 'featured-apps.csv');
+  assert.equal(out.getFileName(), 'featured-app-board.csv');
   const lines = out.getContent().split('\r\n');
   assert.equal(lines[0], 'name,type,status,since,since_exact,party_ids,record');
-  assert.equal(lines[1], 'Tidepool DEX,Basic Featured App,provisional,2026-11-14,true,,https://lists.example/tidepool');
-  assert.equal(lines[3], 'Lumen Wallet,,featured,2026-07-07,false,' + PID_B + ' ' + PID_C + ',');
-  assert.equal(lines[4], '"\'=HYPERLINK(""https://evil.example"",""Win, now"")",,featured,2026-01-02,true,,');
-  assert.equal(lines[5], 'Copper Bridge,Featured Asset,revoked,2026-11-18,true,' + PID_D + ',https://lists.example/copper');
-  assert.equal(lines[6], '', 'ends with a line break');
-  assert.equal(lines.length, 7);
+  assert.equal(lines[1], 'Harbor Vault,Featured Asset-Moving App,featured,2026-11-13,true,' + PID_A + ',https://lists.example/vault');
+  assert.equal(lines[2], 'Lumen Wallet,,featured,2026-07-07,false,' + PID_B + ' ' + PID_C + ',');
+  assert.equal(lines[3], '"\'=HYPERLINK(""https://evil.example"",""Win, now"")",,featured,2026-01-02,true,,');
+  assert.equal(lines[4], 'Tidepool DEX,Basic Featured App,provisional,2026-11-14,true,,https://lists.example/tidepool');
+  assert.equal(lines[9], 'Orbit Ledger,,not_approved,2026-07-07,false,,');
+  assert.equal(lines[10], 'Copper Bridge,Featured Asset,revoked,2026-11-18,true,' + PID_D + ',https://lists.example/copper');
+  assert.equal(lines[11], '', 'ends with a line break');
+  assert.equal(lines.length, 12);
 });
 
 test('public list: cached in chunks with the shards; a missing chunk is rebuilt under the lock', () => {

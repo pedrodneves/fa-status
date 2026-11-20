@@ -318,7 +318,7 @@ test('not approved: the decision and its date, why (our email), apply again, que
   await expect(page.locator('[data-update="declined"]')).toContainText('Emailed 12 Nov 2026');
   await expect(page.locator('[data-update="declined"]')).toContainText('after three months, or sooner with a substantially changed proposal once it\'s live on MainNet');
   await expect(page.locator('[data-section="help"] h2')).toHaveText('Questions about this decision?');
-  await expect(page.locator('[data-section="public"]')).toHaveCount(0);
+  await expect(page.locator('[data-section="public"]')).toHaveCount(1);
   await expect(page.locator('.tile')).not.toContainText(['Testing']);
   await shot(page, 'app-not-approved', testInfo);
 
@@ -353,36 +353,45 @@ test('provisional: the pill, a flagged last step, the conditions wording, and wh
   await shot(page, 'app-provisional', testInfo);
 });
 
-// ------------------------------------------------------------------ the public list (#featured)
+// ------------------------------------------------------------------ the public board (#featured)
 
 const PID = (hint, ch) => hint + '::1220' + ch.repeat(64);
 
-/** The public list in the backend's contract shape (newest first). */
+/** The public board in the backend's contract shape (by status, newest first). */
 function featuredList() {
   return {
     updated: '2026-11-20T14:20:00Z',
     apps: [
-      { name: 'Tidepool DEX', type: 'Featured Asset-Moving App', status: 'provisional', since: '2026-11-14', sinceExact: true, partyIds: [PID('tidepool-1', 'a')], record: 'https://lists.example.org/g/tokenomics/message/7' },
       { name: 'Harbor Swap', type: 'Featured Asset-Moving App', status: 'featured', since: '2026-11-13', sinceExact: true, partyIds: [PID('harborswap-1', 'b'), PID('harborswap-ops', 'c')], record: 'https://lists.example.org/g/tokenomics/message/8' },
       { name: 'Lumen Wallet', type: 'Basic Featured App', status: 'featured', since: '2026-10-29', sinceExact: true, partyIds: [PID('lumen', 'd')], record: null },
       { name: 'Quarry Bonds', type: 'Featured Asset', status: 'featured', since: '2026-07-07', sinceExact: false, partyIds: [], record: 'javascript:alert(1)' },
-      { name: 'Orchard Analytics', type: null, status: 'featured', since: '2026-07-07', sinceExact: false, partyIds: [PID('orchard', 'e')], record: 'https://lists.example.org/g/tokenomics/message/2' }
+      { name: 'Orchard Analytics', type: null, status: 'featured', since: '2026-07-07', sinceExact: false, partyIds: [PID('orchard', 'e')], record: 'https://lists.example.org/g/tokenomics/message/2' },
+      { name: 'Tidepool DEX', type: 'Featured Asset-Moving App', status: 'provisional', since: '2026-11-14', sinceExact: true, partyIds: [PID('tidepool-1', 'a')], record: 'https://lists.example.org/g/tokenomics/message/7' },
+      { name: 'Kestrel Pay', type: null, status: 'in_review', since: '2026-11-02', sinceExact: true, partyIds: [PID('kestrel', 'f')], record: null },
+      { name: 'Orbit Ledger', type: 'Basic Featured App', status: 'not_approved', since: '2026-11-12', sinceExact: true, partyIds: [], record: null },
+      { name: 'Copper Bridge', type: 'Featured Asset', status: 'revoked', since: '2026-11-18', sinceExact: true, partyIds: [PID('copper-bridge', '9')], record: 'https://lists.example.org/g/tokenomics/message/5' },
+      { name: 'Pilot Markets', type: null, status: 'revoked', since: '2026-07-07', sinceExact: false, partyIds: [], record: null },
+      { name: 'Old Mill', type: null, status: 'withdrawn', since: '2026-09-01', sinceExact: true, partyIds: [], record: null }
     ]
   };
 }
 
 const pubRow = (page, name) => page.locator('.pub-row').filter({ has: page.locator('.pub-name', { hasText: name }) });
+const table = (page, status) => page.locator('[data-section="status"][data-status="' + status + '"]');
 
-test('public list: the numbers, one row per app with its Party IDs, from one plain GET', async ({ page }, testInfo) => {
+test('public board: the numbers, one table per status, rows with Party IDs, from one plain GET', async ({ page }, testInfo) => {
   const requests = await mockApi(page, featuredList());
   await page.goto('/#featured');
-  await expect(screen(page, 'featured').locator('h1')).toHaveText('Featured apps');
-  await expect(page).toHaveTitle('Featured apps · Featured App Status');
+  await expect(screen(page, 'featured').locator('h1')).toHaveText('Featured App board');
+  await expect(page).toHaveTitle('Featured App board · Featured App Status');
   await expect(page.locator('[data-private-link]')).toBeHidden();
-  await expect(page.locator('.pub-stat dd')).toHaveText(['5', '2', '1']);
-  await expect(page.locator('.pub-row')).toHaveCount(5);
-  await expect(page.locator('[data-section="revoked"]')).toHaveCount(0);
-  await expect(page.locator('.pub-foot')).toContainText('Showing 5 of 5');
+  await expect(page.locator('.pub-stat dt')).toHaveText(['Featured apps', 'Asset-moving', 'Provisional', 'Applications']);
+  await expect(page.locator('.pub-stat dd')).toHaveText(['5', '2', '1', '10']);
+  await expect(page.locator('[data-toggles="status"] .filter')).toHaveText(['Featured 4', 'Provisional 1', 'In review 1', 'Not approved 1', 'Revoked 2', 'Withdrawn 1']);
+  const tables = page.locator('[data-section="status"]');
+  await expect(tables.locator('h2')).toHaveText(['Featured 4', 'Provisionally approved 1', 'In committee review 1', 'Not approved 1', 'Featured status revoked 2', 'Withdrawn 1']);
+  await expect(page.locator('.pub-row')).toHaveCount(10);
+  await expect(page.locator('.pub-foot')).toContainText('Showing 10 of 10 applications');
   await expect(page.locator('.pub-foot')).toContainText('Updated 20 Nov 2026');
 
   const tidepool = pubRow(page, 'Tidepool DEX');
@@ -390,7 +399,7 @@ test('public list: the numbers, one row per app with its Party IDs, from one pla
   await expect(tidepool.locator('.pub-note')).toContainText('can revoke it');
   const harbor = pubRow(page, 'Harbor Swap');
   await expect(harbor.locator('[data-field="party-id"]')).toHaveText([PID('harborswap-1', 'b'), PID('harborswap-ops', 'c')]);
-  await expect(harbor.locator('.pub-since')).toContainText('13 Nov 2026');
+  await expect(harbor.locator('.pub-since')).toHaveText('Featured since: 13 Nov 2026');
   await expect(harbor.locator('.pub-record a')).toHaveAttribute('href', 'https://lists.example.org/g/tokenomics/message/8');
   const quarry = pubRow(page, 'Quarry Bonds');
   await expect(quarry.locator('.pub-since')).toContainText('By 7 Jul 2026');
@@ -398,6 +407,24 @@ test('public list: the numbers, one row per app with its Party IDs, from one pla
   await expect(quarry).toContainText('No Party ID on file');
   await expect(pubRow(page, 'Orchard Analytics').locator('.pub-type')).toContainText('Not set yet');
   await expect(pubRow(page, 'Lumen Wallet').locator('.pub-note')).toHaveCount(0);
+
+  // Other statuses: their own pill and date label; no announcement column unless the app was approved.
+  const kestrel = pubRow(page, 'Kestrel Pay');
+  await expect(kestrel.locator('.pill')).toHaveText('In review');
+  await expect(kestrel.locator('.pub-since')).toHaveText('In review since: 2 Nov 2026');
+  await expect(kestrel.locator('.pub-record')).toHaveText('');
+  await expect(kestrel.locator('[data-field="party-id"]')).toHaveText(PID('kestrel', 'f'));
+  await expect(table(page, 'in_review').locator('.pub-head')).toContainText('In review since');
+  await expect(table(page, 'in_review').locator('.pub-head')).not.toContainText('Public record');
+  const orbit = pubRow(page, 'Orbit Ledger');
+  await expect(orbit.locator('.pill')).toHaveText('Not approved');
+  await expect(orbit.locator('.pill')).toHaveClass(/bad/);
+  await expect(orbit.locator('.pub-since')).toHaveText('Decided on: 12 Nov 2026');
+  const copper = pubRow(page, 'Copper Bridge');
+  await expect(copper.locator('.pill')).toHaveText('Revoked');
+  await expect(copper.locator('.pub-since')).toHaveText('Revoked on: 18 Nov 2026');
+  await expect(copper.locator('.pub-record a')).toHaveAttribute('href', 'https://lists.example.org/g/tokenomics/message/5');
+  await expect(pubRow(page, 'Old Mill').locator('.pill')).toHaveText('Withdrawn');
 
   expect(requests).toHaveLength(1);
   const url = new URL(requests[0].url());
@@ -411,80 +438,53 @@ test('public list: the numbers, one row per app with its Party IDs, from one pla
   await shot(page, 'featured', testInfo);
 });
 
-test('public list: filter chips from the data, and search by name or Party ID', async ({ page }) => {
+test('public board: status toggles hide tables; the type filter and the search cover every table', async ({ page }) => {
   await mockApi(page, featuredList());
   await page.goto('/#featured');
-  const chips = page.locator('.filter');
-  await expect(chips).toHaveText(['All 5', 'Basic Featured App 1', 'Featured Asset-Moving App 2', 'Featured Asset 1', 'Type not set 1', 'Provisional 1']);
+  const featuredToggle = page.locator('[data-toggles="status"] .filter[data-status="featured"]');
+  await featuredToggle.click();
+  await expect(featuredToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(table(page, 'featured')).toBeHidden();
+  await expect(page.locator('.pub-foot')).toContainText('Showing 6 of 10 applications');
+  await featuredToggle.click();
+  await expect(featuredToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(table(page, 'featured')).toBeVisible();
+
+  const chips = page.locator('[data-toggles="type"] .filter');
+  await expect(chips).toHaveText(['All types 10', 'Basic Featured App 2', 'Featured Asset-Moving App 2', 'Featured Asset 2', 'Type not set 4']);
   await expect(chips.first()).toHaveAttribute('aria-pressed', 'true');
-
-  await chips.filter({ hasText: 'Featured Asset-Moving App' }).click();
-  await expect(chips.filter({ hasText: 'Featured Asset-Moving App' })).toHaveAttribute('aria-pressed', 'true');
+  await chips.filter({ hasText: 'Featured Asset 2' }).click();
   await expect(chips.first()).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.locator('.pub-name')).toHaveText(['Tidepool DEX', 'Harbor Swap']);
+  await expect(page.locator('.pub-name')).toHaveText(['Quarry Bonds', 'Copper Bridge']);
+  await expect(page.locator('[data-section="status"]:visible h2')).toHaveText(['Featured 1', 'Featured status revoked 1']);
 
+  await chips.first().click();
   const search = page.getByLabel('Search by app name or Party ID');
   await search.fill('harborswap-ops');
   await expect(page.locator('.pub-name')).toHaveText(['Harbor Swap']);
   await expect(search).toBeFocused();
-
-  await chips.first().click();
-  await search.fill('LUMEN');
-  await expect(page.locator('.pub-name')).toHaveText(['Lumen Wallet']);
+  await search.fill('ORBIT');
+  await expect(page.locator('.pub-name')).toHaveText(['Orbit Ledger']);
+  await expect(table(page, 'not_approved')).toBeVisible();
   await search.fill('nothing like this');
   await expect(page.locator('.pub-row')).toHaveCount(0);
-  await expect(page.locator('.pub-empty')).toHaveText('No featured app matches that search.');
-  await expect(page.locator('.pub-foot')).toContainText('Showing 0 of 5');
+  await expect(page.locator('.pub-tables > .pub-empty')).toHaveText('No application matches that search.');
+  await expect(page.locator('.pub-foot')).toContainText('Showing 0 of 10 applications');
 });
 
-test('public list: revoked apps in a card of their own, with the date, searched with the list', async ({ page }, testInfo) => {
-  const body = featuredList();
-  body.apps.push(
-    { name: 'Copper Bridge', type: 'Featured Asset', status: 'revoked', since: '2026-11-18', sinceExact: true, partyIds: [PID('copper-bridge', '9')], record: 'https://lists.example.org/g/tokenomics/message/5' },
-    { name: 'Pilot Markets', type: null, status: 'revoked', since: '2026-07-07', sinceExact: false, partyIds: [], record: null }
-  );
-  await mockApi(page, body);
-  await page.goto('/#featured');
-
-  // The featured list, its numbers and chips leave the revoked apps out.
-  const main = page.locator('[data-section="featured"]');
-  await expect(page.locator('.pub-stat dd')).toHaveText(['5', '2', '1']);
-  await expect(page.locator('.filter').first()).toHaveText('All 5');
-  await expect(main.locator('.pub-row')).toHaveCount(5);
-  await expect(main.locator('.pub-foot')).toContainText('Showing 5 of 5');
-
-  const revoked = page.locator('[data-section="revoked"]');
-  await expect(revoked.locator('h2')).toHaveText('Featured status revoked 2');
-  await expect(revoked.locator('.pub-head')).toContainText('Revoked on');
-  await expect(revoked.locator('.pub-name')).toHaveText(['Copper Bridge', 'Pilot Markets']);
-  const copper = pubRow(page, 'Copper Bridge');
-  await expect(copper.locator('.pill')).toHaveText('Revoked');
-  await expect(copper.locator('.pill')).toHaveClass(/bad/);
-  await expect(copper.locator('.pub-since')).toHaveText('Revoked on: 18 Nov 2026');
-  await expect(copper.locator('[data-field="party-id"]')).toHaveText(PID('copper-bridge', '9'));
-  await expect(pubRow(page, 'Pilot Markets').locator('.pub-since')).toContainText('By 7 Jul 2026');
-  await shot(page, 'featured-revoked', testInfo);
-
-  // The search covers both lists.
-  const search = page.getByLabel('Search by app name or Party ID');
-  await search.fill('copper-bridge');
-  await expect(main.locator('.pub-empty')).toHaveText('No featured app matches that search.');
-  await expect(revoked.locator('.pub-name')).toHaveText(['Copper Bridge']);
-  await search.fill('harbor');
-  await expect(main.locator('.pub-name')).toHaveText(['Harbor Swap']);
-  await expect(revoked.locator('.pub-empty')).toHaveText('No revoked app matches that search.');
+test('every application page says what the public board shows about it', async ({ page }) => {
+  for (const [i, state] of ['in_review', 'revoked'].entries()) {
+    await mockApi(page, one({ state: state, dvp: [] }));
+    await page.goto('/#' + TOKEN.slice(0, 21) + 'pq'[i]);
+    const card = page.locator('[data-section="public"]');
+    await expect(card.locator('h2')).toHaveText('On the public board');
+    await expect(card).toContainText('on the public Featured App board');
+    await expect(card.locator('a')).toHaveAttribute('href', '#featured');
+    await page.unroute(API);
+  }
 });
 
-test('revoked: the application page says the app is on the public list as revoked', async ({ page }) => {
-  await mockApi(page, one({ state: 'revoked', dvp: [], announcement: 'https://lists.example.org/g/tokenomics/message/5' }));
-  await page.goto('/#' + TOKEN);
-  await expect(pill(page)).toHaveText('Featured status revoked');
-  const card = page.locator('[data-section="public"]');
-  await expect(card).toContainText('on the public list as revoked');
-  await expect(card.locator('a')).toHaveAttribute('href', '#featured');
-});
-
-test('public list: copy a Party ID', async ({ page, context }) => {
+test('public board: copy a Party ID', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await mockApi(page, featuredList());
   await page.goto('/#featured');
@@ -494,23 +494,24 @@ test('public list: copy a Party ID', async ({ page, context }) => {
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(PID('lumen', 'd'));
 });
 
-test('public list: a failure shows the retry screen; an empty list says so', async ({ page }) => {
+test('public board: a failure shows the retry screen; an empty board says so', async ({ page }) => {
   let body = { error: 'unavailable' };
   await mockApi(page, (route) => route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify(body) }));
   await page.goto('/#featured');
-  await expect(screen(page, 'error').locator('h1')).toHaveText("We couldn't load the list");
+  await expect(screen(page, 'error').locator('h1')).toHaveText("We couldn't load the board");
   body = { updated: '2026-11-20T14:20:00Z', apps: [] };
   await page.locator('[data-action="retry"]').click();
   await expect(screen(page, 'featured')).toBeVisible();
-  await expect(page.locator('.pub-empty')).toHaveText('No apps are listed yet.');
-  await expect(page.locator('.pub-stat dd')).toHaveText(['0', '0']);
+  await expect(page.locator('.pub-tables > .pub-empty')).toHaveText('No applications are listed yet.');
+  await expect(page.locator('[data-section="status"]')).toHaveCount(0);
+  await expect(page.locator('.pub-stat dd')).toHaveText(['0', '0', '0']);
 });
 
-test('the start page and the footer link to the public list, and its back link returns', async ({ page }) => {
+test('the start page and the footer link to the public board, and its back link returns', async ({ page }) => {
   await mockApi(page, featuredList());
   await page.goto('/');
-  await expect(page.locator('footer a[href="#featured"]')).toHaveText('Featured apps');
-  await page.getByRole('link', { name: 'See which apps are featured →' }).click();
+  await expect(page.locator('footer a[href="#featured"]')).toHaveText('Featured App board');
+  await page.getByRole('link', { name: 'See the Featured App board →' }).click();
   await expect(screen(page, 'featured')).toBeVisible();
   await page.getByRole('link', { name: '← Check your own application' }).click();
   await expect(screen(page, 'start')).toBeVisible();
@@ -596,7 +597,7 @@ test('start page: how review works, every status, the FAQ, and the footer links'
   await page.goto('/');
   await expect(page.locator('[data-section="how"] li')).toHaveCount(6);
   await expect(page.locator('[data-section="how"] li').nth(4)).toContainText('Tokenomics Committee review');
-  await expect(page.locator('[data-section="how"] li').nth(5)).toContainText('the public list of featured apps');
+  await expect(page.locator('[data-section="how"] li').nth(5)).toContainText('the public Featured App board');
   await expect(page.locator('[data-section="statuses"] .pill')).toHaveCount(10);
   await expect(page.locator('[data-section="statuses"]')).toContainText('Provisionally approved');
   await expect(page.locator('[data-section="faq"] details')).toHaveCount(7);
@@ -791,7 +792,7 @@ test('no horizontal scroll at 360px; dark mode has a dark background', async ({ 
   await page.unroute(API);
   await mockApi(page, featuredList());
   await page.goto('/#featured');
-  await expect(page.locator('.pub-row')).toHaveCount(5);
+  await expect(page.locator('.pub-row')).toHaveCount(10);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   if (testInfo.project.name === 'mobile') await shot(page, 'featured-360', testInfo);
   await page.goto('/');

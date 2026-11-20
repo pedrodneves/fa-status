@@ -1007,9 +1007,12 @@ a.app:hover .app-name { text-decoration: underline; text-underline-offset: 3px; 
 }
 .pub-party-row .copy { min-height: 32px; padding: 2px 10px; }
 .pub-note { padding: 8px 12px; border-radius: 10px; background: var(--warn-soft); font-size: 14px; }
-.pub-empty { padding: 20px 0; border-top: 1px solid var(--line); color: var(--muted); }
 .pub-foot { padding: 12px 0 8px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
-.pub-gap { padding-top: 20px; } /* the revoked apps' card, under the list */
+/* One card per status under the tools card; a card is hidden when its status is off or nothing matches. */
+.pub-tables { display: grid; gap: 20px; padding-top: 20px; }
+.pub-tables > .pub-empty { margin: 0; padding: 22px 24px; color: var(--muted); }
+.pub-group { display: grid; gap: 8px; }
+.pub-group-label { margin: 0; font-size: 13px; color: var(--muted); }
 
 /* Below the list: the JSON / CSV feed and "About this list". */
 .pub-more {

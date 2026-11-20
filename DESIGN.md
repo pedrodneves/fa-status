@@ -2,7 +2,7 @@
 
 ## What we're building
 
-A public page where Featured App applicants see where their own FA applications and DVP requests stand, without seeing anyone else's. The same page also lists, for everyone, the apps that hold Featured App status, with their Party IDs (added 20 Nov 2026, from screen 5 of the redesign canvas), and the apps whose status was revoked. It pulls from two Monday boards:
+A public page where Featured App applicants see where their own FA applications and DVP requests stand, without seeing anyone else's. The same page also has a public board for everyone: every application with its status, Party IDs and a few other fields (added 20 Nov 2026), like the public board on intro.canton.foundation but without the rest of each application. It pulls from two Monday boards:
 - **Featured App Submissions** (FA), board `18420896395`
 - **Asset Moving Status Requests** (DVP), board `18436778970`
 
@@ -14,7 +14,7 @@ A public page where Featured App applicants see where their own FA applications 
 
 | Part | Where | Role |
 |---|---|---|
-| Page | `docs/` on GitHub Pages | Static, the same for everyone; no data, no secrets. Shows the email form, a private link's applications, or the public list. |
+| Page | `docs/` on GitHub Pages | Static, the same for everyone; no data, no secrets. Shows the email form, a private link's applications, or the public board. |
 | Backend | `apps-script/Code.gs`, Apps Script web app (Execute as: me, Who has access: Anyone) | Holds the Monday token and the link secret. Reads Monday every 10 minutes, caches, answers the page, emails links. |
 | Data | Monday | Read-only. |
 
@@ -22,7 +22,7 @@ A public page where Featured App applicants see where their own FA applications 
 applicant ── types email ──▶ page ── POST {email} ──▶ doPost ── MailApp ──▶ applicant's inbox
 applicant ── opens link ───▶ page ── GET ?link=<token> ──▶ doGet ── cache ──▶ {found, apps}
 anyone ──── opens #featured ▶ page ── GET ?view=featured ──▶ doGet ── cache ──▶ {updated, apps}
-trigger (10 min) ─────────▶ refresh ── read FA + DVP boards ──▶ cache (64 shards + public list)
+trigger (10 min) ─────────▶ refresh ── read FA + DVP boards ──▶ cache (64 shards + public board)
 ```
 
 ## Access model
@@ -41,19 +41,19 @@ trigger (10 min) ─────────▶ refresh ── read FA + DVP boa
   - 407 of 422 FA rows have at least one address. The other 15 can't be reached.
   - 530 distinct addresses can get a link, with at most 5 rows per address.
 
-## Public list (added 20 Nov 2026)
+## Public board (added 20 Nov 2026)
 
-- **Who is listed:** every FA row whose state has Featured App status: `approved` ("2-Approved") and `provisional` ("2b-Provisional", once the committee adds that label); and every row whose status was revoked (`revoked`, "5-Revoked"), which the committee decided on 20 Nov 2026. Nothing else is listed: not apps in review, declined, withdrawn or closed.
+- **Who is listed:** every FA row, in one table per status, as on the public board at intro.canton.foundation/featured-app-board.html (the user asked for that on 20 Nov 2026, with only the fields below). It started as a list of apps with Featured App status, then added revoked apps (the committee's answer of 20 Nov 2026), then every status.
 - **What is public, per app (the allow-list, `toPublicView_`):**
   - `name`: the item name.
   - `type`: the FA Type label, or null when not set yet.
-  - `status`: `featured`, `provisional` or `revoked`.
-  - `since` / `sinceExact`: the date the FA Status last changed (`value.changed_at`), with `sinceExact: true`: the date the app was featured or, for a revoked app, the date it was revoked. Rows imported when the board was created (7 Jul 2026) have no change date, so `since` is the item's `created_at` date and `sinceExact` is false: the app was featured (or revoked) on or before that day. The page shows "By 7 Jul 2026".
+  - `status` (`PUBLIC_STATUS_BY_STATE`): `featured` (2-Approved), `provisional` (2b-Provisional, once the committee adds that label), `with_tokenomics`, `in_review` (0-Locked and 1-Needs Review, and any unknown label), `received` (empty), `on_hold`, `not_approved`, `revoked`, `withdrawn` or `closed_process`.
+  - `since` / `sinceExact`: the date the FA Status last changed (`value.changed_at`), with `sinceExact: true`: the date the application reached its status. Rows imported when the board was created (7 Jul 2026) have no change date, so `since` is the item's `created_at` date and `sinceExact` is false: the status was reached on or before that day. The page shows "By 7 Jul 2026".
   - `partyIds`: the Canton party IDs in the free-text Party ID cell (`long_text_mm4kq322`), at most 5. Only well-formed IDs: a hint (letters, digits, `_`, `-`, single `:`; never `::`; up to 185 characters), `::1220` and 64 hex digits. Two IDs typed without a separator are both found. Text in any other form (a space before `::`, a fingerprint of the wrong length) gives none, and the run counts it as `partyIdUnreadable`.
-  - `record`: the FA Link (`link_mm6hfp5g`, the announcement), https only.
-- **Never public:** the institution, addresses, review progress, dates of the review, testing, lock, emails from the committee, DVP requests, and everything else.
-- **Order:** apps with Featured App status first, most recently featured first; then revoked apps, most recently revoked first; undated last, then by name.
-- **Coverage (20 Nov 2026):** 148 featured apps and 24 revoked ones. Of the 148 featured, 144 have one Party ID, 2 have two, 2 have none (one empty cell, one written "Mod-Vault ::1220…" with a space). 45 have an exact date, 103 an import date. 72 have no FA Type yet. 138 have an announcement link.
+  - `record`: the FA Link (`link_mm6hfp5g`, the announcement), https only, and only for apps that were approved (`ANNOUNCED_STATES`: approved, provisional, revoked). Others get null even when the cell is filled.
+- **Never public:** the institution, addresses, review details (lock, testing, committee notes and recommendations, emails from the committee), DVP requests, and every other column.
+- **Order:** by status (`PUBLIC_STATUS_ORDER`: featured, provisional, with_tokenomics, in_review, received, on_hold, not_approved, revoked, withdrawn, closed_process); within a status, the most recent date first, undated last, then by name.
+- **Coverage (20 Nov 2026):** 425 applications: 148 featured, 23 in review, 57 on hold, 31 not approved, 24 revoked, 24 withdrawn, 118 closed (the same counts as the intro board). 355 Party IDs; 25 rows have Party ID text with no well-formed ID. Of the 148 featured, 144 have one Party ID, 2 have two, 2 have none (one empty cell, one written "Mod-Vault ::1220…" with a space); 72 have no FA Type yet; 138 have an announcement link.
 
 ## Monday facts (read 16 Nov 2026, `API-Version: 2026-10`)
 
@@ -76,7 +76,7 @@ trigger (10 min) ─────────▶ refresh ── read FA + DVP boa
 | faType | `color_mm8z4ket` | FA Type (Basic Featured App / Featured Asset-Moving App / Featured Asset) |
 | dvpStatus | `color_mm8a49an` | DVP Status on the FA board |
 
-**Read but never sent anywhere:** `email_mm4ke170` and `text_mm4kvrar`, which decide who may see a row. **Never requested:** every other column (Entry ID, FAAC notes, tester, Slack fields, Tier, sponsors, tags, form answers…). Besides columns, each item's `created_at` is read, for the public list's dates.
+**Read but never sent anywhere:** `email_mm4ke170` and `text_mm4kvrar`, which decide who may see a row. **Never requested:** every other column (Entry ID, FAAC notes, tester, Slack fields, Tier, sponsors, tags, form answers…). Besides columns, each item's `created_at` is read, for the public board's dates.
 
 **DVP board** (24 rows):
 - Columns read: Status `color_mm8dhgvr`, Submission Date `date_mm8dsx4y`, Final Approval Date `date_mm8dm7a0`, Request Link `link_mm8rp25j` (a post on `lists.sync.global/g/accountability`, text like `#116 – <app name>`).
@@ -120,7 +120,7 @@ The backend sends state keys; all page wording lives in `docs/status.js`.
 
 Any other label is treated as `in_review` and logged under `unknownLabels`.
 
-- **Provisional (20 Nov 2026):** the committee agreed to a `2b-Provisional` label (screen 7 of the canvas), but the board doesn't have it yet. The mapping is in place, so the page and the public list show it as soon as the label is added, with no deploy. Its conditions would need a new column, so the page says they are in the committee's email.
+- **Provisional (20 Nov 2026):** the committee agreed to a `2b-Provisional` label (screen 7 of the canvas), but the board doesn't have it yet. The mapping is in place, so the page and the public board show it as soon as the label is added, with no deploy. Its conditions would need a new column, so the page says they are in the committee's email.
 - **Not approved (20 Nov 2026):** the board records no reason for a decision: the "Decision reason" column of screen 6 doesn't exist, and "FAAC Thoughs" / "FAAC Rec" are internal notes, never shown. So the page says the committee's email explains why, and shows when the decision was made (the history's change to Not approved, else the Decline email's date). If a reason column is added later, it can be read and shown like any other column.
 - **Applying again (the committee's rule, 20 Nov 2026):** after three months, or sooner with a substantially changed proposal once that version is live on MainNet. The Not approved status box and the Decline email's text both say so.
 
@@ -169,7 +169,7 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
 - Apps and DVP requests are newest first.
 - An unknown token gets `{"found": false}`. Any failure gets `{"error": "unavailable"}`, with no details.
 - Texts are capped and links are https-only (otherwise `null`).
-- `announcement` is sent only when the app is on the public list (approved, provisional or revoked), and `finalApproval` only when the request is approved.
+- `announcement` is sent only when the app was approved (`ANNOUNCED_STATES`: approved, provisional or revoked), and `finalApproval` only when the request is approved.
 - `lock.confirmed` is true when the FA Status is "0-Locked+Needs Review": the page then marks the lock step done, even without a Lock Verified date.
 - `history` (added 17 Nov 2026) lists the app's changes from Monday's activity log, newest first, at most 80:
   - Kinds: `status` (`to`/`from`, the state keys, with `in_review_locked` for "0-Locked+Needs Review"), `testing` (`to`), `lock_verified` (`date`), `lock_amount` (`amount`), `email` (`to`, the email kind), `fa_type` (`text`, the label), `dvp_status` (`to`) and `dvp_state` (`to`, `request`: a DVP request of this app).
@@ -177,7 +177,7 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
   - Left out: cleared cells, labels that send nothing, and changes that don't change the key.
   - Optional: when the activity log can't be read, `history` is absent and the page falls back to the dates it has.
 
-`GET <exec>?view=featured` (the public list, anyone):
+`GET <exec>?view=featured` (the public board, anyone):
 
 ```json
 {
@@ -189,8 +189,8 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
 }
 ```
 
-- `updated` is when the refresh that built the list ran. Apps with Featured App status come first, most recent first, then revoked apps, most recently revoked first; ties by name.
-- `&format=csv` gives the same list as `featured-apps.csv`: `name,type,status,since,since_exact,party_ids,record`, several Party IDs separated by a space. A cell starting with `=`, `+`, `-` or `@` gets a leading `'`, so a spreadsheet never runs it as a formula.
+- `updated` is when the refresh that built the board ran. Apps are in the board's order (above).
+- `&format=csv` gives the same board as `featured-app-board.csv`: `name,type,status,since,since_exact,party_ids,record`, several Party IDs separated by a space. A cell starting with `=`, `+`, `-` or `@` gets a leading `'`, so a spreadsheet never runs it as a formula.
 - Any failure gets `{"error": "unavailable"}` (JSON, also for the CSV).
 
 `POST <exec>` with body `{"email": "..."}` (`text/plain`) gets one of:
@@ -207,8 +207,8 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
 
 **Entry points:**
 - `doGet(e)` (a link, or `view=featured`), `doPost(e)`, `refresh()` (10-minute trigger), `setup()` (run once by hand).
-- `toApplicantView(row, dvpRows)` is the allow-list, built field by field. `toPublicView_(row)` is the public list's (`PUBLIC_STATUS_BY_STATE`: approved → featured, provisional → provisional, revoked → revoked).
-- A cache miss, for a link or the public list, rebuilds from Monday under the script lock (`fromCacheOrRebuild_`).
+- `toApplicantView(row, dvpRows)` is the allow-list, built field by field. `toPublicView_(row)` is the public board's.
+- A cache miss, for a link or the public board, rebuilds from Monday under the script lock (`fromCacheOrRebuild_`).
 
 **History (per link, section 8b):**
 - `doGet` adds `history` to a found answer (`withHistory_`).
@@ -222,7 +222,7 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
 **Cache (CacheService):**
 - 64 shards keyed by the token's first character (`fa2:<charCode>`). Each holds `{token: {apps}}`.
 - All 64 are written in one `putAll` on every run, `{}` when empty, so an address removed from Monday loses access on the next run.
-- The public list goes in the same `putAll`: its rows in chunks of at most 90 KB under `fa2:pub:0`, `fa2:pub:1`…, and an index `{updated, chunks}` under `fa2:pub`. A missing chunk counts as a miss. On real data (20 Nov 2026) it is one chunk of about 40 KB.
+- The public board goes in the same `putAll`: its rows in chunks of at most 90 KB under `fa2:pub:0`, `fa2:pub:1`…, and an index `{updated, chunks}` under `fa2:pub`. A missing chunk counts as a miss. On real data (20 Nov 2026) it is one chunk of about 40 KB.
 - Expiry is 6 h.
 - On a missing shard, the request rebuilds the cache from Monday under the script lock.
 - Largest shard on real data: about 8 KB of the 100 KB limit.
@@ -232,7 +232,7 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
 - Retries 429/5xx twice, honouring `Retry-After` up to 10 s.
 - A read is all or nothing: a failed run keeps the previous cache.
 
-**Logging:** one JSON line per run with counts and unknown labels (including `featured`, `revoked` and `partyIdUnreadable`). Addresses, tokens, names and Monday error messages are never logged.
+**Logging:** one JSON line per run with counts and unknown labels (including `listed`, `featured` and `partyIdUnreadable`). Addresses, tokens, names and Monday error messages are never logged.
 
 **Permissions (`appsscript.json`):**
 - `script.external_request` (Monday)
@@ -243,7 +243,7 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
 
 **Routes:**
 - (none): the email form.
-- `#featured`: the public list of featured apps.
+- `#featured`: the public board.
 - `#<token>`: the list of applications, or the only one directly.
 - `#<token>/app-<id>`: one application.
 - `#<token>[/app-<id>]/dvp-<id>`: one DVP request.
@@ -258,10 +258,10 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
   - Main column: the status box with "What happens next" (`next` in the wording, per state), the latest committee email, and the History card. It lists every change from `history` with its date and local time, plus the submission dates; the first 6 show, the rest sit behind "Show N earlier changes". Without `history` it falls back to the dated events it can derive.
   - Side column: On file (with "Copy Party ID"), DVP, and a help box.
 - `dvp`: the same layout, with tiles for submitted, final approval and last updated, a History card (the request's own status changes), a public-record card, and a card back to the application.
-- `featured` (20 Nov 2026, canvas screen 5 plus Party IDs): the band holds the counts (featured apps, asset-moving, provisional when any). The card on its edge has a search (app name or Party ID), Download CSV and JSON feed links, filter chips built from the data (All, each FA Type, Type not set, Provisional), and one row per app: name, type, status, since, announcement, then its Party IDs, each with a copy button. Provisional rows add a note that the status can be revoked. The band, chips and "Showing N of M" count only apps with Featured App status. Revoked apps follow in a card of their own, "Featured status revoked" with their count, the same columns with "Revoked on" for the date, and a red "Revoked" pill; the search covers both cards, and the card is left out when no app is revoked. Below: "Use this list in your tools" (the feed address and its fields) and "About this list". Linked from the start page, the footer and the "On the public list" card.
+- `featured` (20 Nov 2026): "Featured App board". The band holds the counts (featured apps, asset-moving, provisional when any, all applications). The card on its edge has a search (app name or Party ID), Download CSV and JSON feed links, one toggle per status present (all on; turning one off hides its table, several can be off) and the type chips (All types, each FA Type, Type not set; one at a time), then "Showing N of M applications". Below it, one card per status in the board's order, titled with the status and its count, with a header row whose date column is named for the status ("Featured since", "Decided on", "Revoked on"…) and an announcement column only for featured, provisional and revoked. A card is hidden when its status is off or nothing in it matches; when nothing matches at all, one line says so. Each row: name, type, status pill, date, announcement, then its Party IDs with copy buttons; provisional rows add a note that the status can be revoked. Below: "Use this board in your tools" (the feed address and its fields) and "About this board". Linked from the start page ("See the Featured App board →"), the footer and the "On the public board" card.
 - Not approved (canvas screen 6, without a reason column): the steps run received → lock (if verified) → "Featured App Committee review · Decided <date>" → Not approved. The status box says the committee's email explains why; "What happens next" says they can apply again after three months, or sooner with a substantially changed proposal once it is live on MainNet, with an "Apply again" button and the contact line. The help box asks "Questions about this decision?".
 - Provisional (canvas screen 7, without a conditions column): the pill is "Provisionally approved" (amber); the last step is "Featured App status granted" flagged "Provisional", "Conditions apply"; the status box says the conditions are in the committee's email and that the status can be revoked if one isn't met.
-- Featured apps (approved or provisional) get an "On the public list" side card saying what everyone can see about them; revoked apps get the same card, saying they're listed as revoked. The start page's sixth step and a new FAQ ("Is anything about my application public?") say the same.
+- Every application page has an "On the public board" side card saying what everyone can see about it. The start page's sixth step and the FAQ ("Is anything about my application public?") say the same.
 - The footer links (Featured App request, canton.foundation, the accountability list, the support address) are filled by `status.js` from its wording and `config.js`.
 
 **Look:**
@@ -279,6 +279,6 @@ Any other label is treated as `in_review` and logged under `unknownLabels`.
 
 ## Testing
 
-- `npm test`: 38 Node tests of `Code.gs`, with mocked Google services and a fake Monday. They cover tokens, address extraction, label maps, DVP matching, the cache, privacy (no address, sentinel or token anywhere), doGet/doPost, rate limits, setup, the public list (fields, Party ID extraction, CSV, chunked cache), and that no mutation is ever sent.
-- `npm run test:page`: Playwright against the page with a mocked API, desktop and mobile (108 tests).
-- `npm run live-check`: the real boards, read-only, with mocked email. Every address resolves to its rows, nothing leaks, the public list has only public fields and well-formed Party IDs, and no write is sent. Last full run on 16 Nov 2026: 11/11 passed. On 20 Nov 2026 the refresh and the public list alone ran against the real boards: 148 apps, no address, no write.
+- `npm test`: 38 Node tests of `Code.gs`, with mocked Google services and a fake Monday. They cover tokens, address extraction, label maps, DVP matching, the cache, privacy (no address, sentinel or token anywhere), doGet/doPost, rate limits, setup, the public board (fields, Party ID extraction, CSV, chunked cache), and that no mutation is ever sent.
+- `npm run test:page`: Playwright against the page with a mocked API, desktop and mobile (106 tests).
+- `npm run live-check`: the real boards, read-only, with mocked email. Every address resolves to its rows, nothing leaks, the public board has every application with only public fields and well-formed Party IDs, and no write is sent. Last full run on 16 Nov 2026: 11/11 passed. On 20 Nov 2026 the refresh and the public board alone ran against the real boards: 148 apps, no address, no write.

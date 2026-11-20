@@ -96,7 +96,7 @@
       invalid: 'Enter one email address, like name@company.com.',
       failed: "We couldn't send your link just now. Please try again in a minute.",
       fine: 'We only email addresses that are on a Featured App application. Questions? Contact the Featured App team at {email}.',
-      publicLink: 'See which apps are featured →'  // to the public list (#featured)
+      publicLink: 'See the Featured App board →'  // to the public board (#featured)
     },
     sent: {
       heading: 'Check your email',
@@ -136,7 +136,7 @@
           { key: 'testing', text: 'We test your app. If we need access from you, we email you.' },
           { key: 'committee', text: 'The committee reviews your application and may invite you to its office hours.' },
           { key: 'tokenomics', text: 'Once the Featured App Committee approves, the Tokenomics Committee does the final review.' },
-          { key: 'granted', text: 'Approval is announced on the tokenomics mailing list, and the app joins the public list of featured apps.' }
+          { key: 'granted', text: 'Approval is announced on the tokenomics mailing list, and the app shows as featured on the public Featured App board.' }
         ]
       },
       // Labels and explanations come from fa.states.
@@ -151,7 +151,7 @@
         items: [
           { q: "I didn't get an email", a: 'Links can take a few minutes, so check your spam folder. We only email addresses that are on an application, as its main email or as a responsible person. Nothing after 15 minutes? Try another address you applied with, or contact the Featured App team at {email}.' },
           { q: 'Who can see my status?', a: 'Anyone who has your link. Each address on an application gets its own link, which shows only the applications that list that address. Share it only within your team.' },
-          { q: 'Is anything about my application public?', a: "Only once your app is featured. The public list of featured apps then shows its name, Featured App type, status, the date it was featured, its Party ID and the announcement. If the status is later revoked, the app stays on the list as revoked, with the date. Nothing else from your application is public." },
+          { q: 'Is anything about my application public?', a: "A little. The public Featured App board lists every application with its name, Featured App type, status, the date it reached that status and its Party ID, plus the announcement once approved. Nothing else from your application is public: not your institution, your email addresses, the review's details or our emails." },
           { q: 'How current is the page?', a: "It refreshes from the committee's records every 10 minutes. Each application shows the date its record last changed." },
           { q: 'I lost my link. Can I get it again?', a: "Yes. Enter your email address above and we'll send the same link again. You can ask once every 15 minutes, up to three times in six hours." },
           { q: "My DVP request isn't showing", a: 'DVP requests are matched to applications by name. If your request uses a different name from your application, contact the Featured App team at {email} so they can link them.' },
@@ -168,7 +168,7 @@
       about: "Featured App Status shows applicants where their applications stand, and everyone which apps are featured. It's read-only: to change anything, contact the Featured App team.",
       groups: [
         { heading: 'Apply', links: [{ text: 'Featured App request ↗', url: 'reapply' }, { text: 'canton.foundation ↗', url: 'https://canton.foundation/' }] },
-        { heading: 'Public record', links: [{ text: 'Featured apps', hash: 'featured' }, { text: 'Accountability mailing list ↗', url: 'https://lists.sync.global/g/accountability' }] },
+        { heading: 'Public record', links: [{ text: 'Featured App board', hash: 'featured' }, { text: 'Accountability mailing list ↗', url: 'https://lists.sync.global/g/accountability' }] },
         { heading: 'Contact', links: [{ email: true }] }
       ]
     },
@@ -185,71 +185,78 @@
       retry: 'Try again'
     },
 
-    // ---- The public list of featured apps (#featured) ------------------------
-    // Everyone sees the same list. Type labels and their filters come from
-    // the data (the FA Type column), so a new type shows up on its own.
+    // ---- The public board (#featured) ---------------------------------------
+    // Every application, in one table per status, like the public board on
+    // intro.canton.foundation but with only these fields. Everyone sees the
+    // same board. Type labels and their filter come from the data (the FA
+    // Type column), so a new type shows up on its own.
     featured: {
-      title: 'Featured apps',  // browser tab title
+      title: 'Featured App board',  // browser tab title
       eyebrow: 'Public record',
-      heading: 'Featured apps',
-      intro: 'Apps that hold Featured App status on Canton Network, with their type and Party ID, and the apps whose status was revoked. Nothing else from their applications is shown.',
+      heading: 'Featured App board',
+      intro: "Every Featured App application and where it stands, with the app's type and Party ID. Nothing else from the applications is shown.",
       back: '← Check your own application',
-      loading: 'Loading the list of featured apps…',
+      loading: 'Loading the Featured App board…',
       error: {
-        heading: "We couldn't load the list",
+        heading: "We couldn't load the board",
         body: 'Please check your connection and try again. If this keeps happening, contact the Featured App team at {email}.'
       },
-      // The numbers in the band. `assetMoving` counts this FA Type label.
-      stats: { total: 'Featured apps', assetMoving: 'Asset-moving', provisional: 'Provisional' },
+      // The numbers in the band. `total` counts featured and provisional apps,
+      // `assetMoving` those of this FA Type label, `all` every application.
+      stats: { total: 'Featured apps', assetMoving: 'Asset-moving', provisional: 'Provisional', all: 'Applications' },
       assetMovingType: 'Featured Asset-Moving App',
       searchLabel: 'Search by app name or Party ID',
       searchPlaceholder: 'e.g. wallet',
-      filtersLabel: 'Filter the list',
-      filters: { all: 'All', none: 'Type not set', provisional: 'Provisional' },
+      statusesLabel: 'Statuses',
+      statusesHint: 'Turn a status off to hide its table.',
+      typesLabel: 'Featured App type',
+      filters: { all: 'All types', none: 'Type not set' },
       // Type labels in this order first, then any other alphabetically.
       typeOrder: ['Basic Featured App', 'Featured Asset-Moving App', 'Featured Asset'],
-      columns: { app: 'App', type: 'Featured App type', status: 'Status', since: 'Featured since', revokedOn: 'Revoked on', record: 'Public record' },
+      columns: { app: 'App', type: 'Featured App type', status: 'Status', record: 'Public record' },
+      // One table per status, in this order. `heading` titles the table,
+      // `label` and `tone` make the pill, `since` heads the date column.
+      statusOrder: ['featured', 'provisional', 'with_tokenomics', 'in_review', 'received', 'on_hold', 'not_approved', 'revoked', 'withdrawn', 'closed_process'],
       status: {
-        featured: { label: 'Featured', tone: 'ok' },
-        provisional: { label: 'Provisional', tone: 'warn' },
-        revoked: { label: 'Revoked', tone: 'bad' }
-      },
-      // Apps whose Featured App status was revoked: a card of their own under
-      // the list, searched with it. Shown only when there are any.
-      revoked: {
-        heading: 'Featured status revoked',
-        intro: 'These apps held Featured App status, and the committee has revoked it. They no longer have Featured App status.',
-        empty: 'No revoked app matches that search.'
+        featured: { heading: 'Featured', label: 'Featured', tone: 'ok', since: 'Featured since' },
+        provisional: { heading: 'Provisionally approved', label: 'Provisional', tone: 'warn', since: 'Provisional since' },
+        with_tokenomics: { heading: 'With Tokenomics Committee', label: 'With Tokenomics', tone: 'info', since: 'Since' },
+        in_review: { heading: 'In committee review', label: 'In review', tone: 'info', since: 'In review since' },
+        received: { heading: 'Received', label: 'Received', tone: 'info', since: 'Received on' },
+        on_hold: { heading: 'On hold (CIP-0116)', label: 'On hold', tone: 'warn', since: 'On hold since' },
+        not_approved: { heading: 'Not approved', label: 'Not approved', tone: 'bad', since: 'Decided on' },
+        revoked: { heading: 'Featured status revoked', label: 'Revoked', tone: 'bad', since: 'Revoked on' },
+        withdrawn: { heading: 'Withdrawn', label: 'Withdrawn', tone: 'idle', since: 'Withdrawn on' },
+        closed_process: { heading: 'Closed: process changed', label: 'Closed', tone: 'idle', since: 'Closed on' }
       },
       typeNotSet: 'Not set yet',
-      sinceBy: 'By {date}',  // sinceExact false: featured (or revoked) on or before that day
+      sinceBy: 'By {date}',  // sinceExact false: the app reached its status on or before that day
       record: 'Announcement ↗',
-      noRecord: 'Not linked',
+      noRecord: 'Not linked',  // an approved (or revoked) app without an announcement link
       partyId: 'Party ID',
       noPartyId: 'No Party ID on file',
       copy: 'Copy',
       copyName: 'Copy the Party ID of {name}',  // the copy button's accessible name
       provisionalNote: "Provisional: the committee set conditions for this status, and can revoke it if they aren't met.",
-      showing: 'Showing {shown} of {total}',
+      showing: 'Showing {shown} of {total} applications',
       updated: 'Updated {day}, {time}',
-      empty: 'No featured app matches that search.',
-      none: 'No apps are listed yet.',
+      empty: 'No application matches that search.',
+      none: 'No applications are listed yet.',
       csv: 'Download CSV',
       json: 'JSON feed ↗',
       feed: {
-        heading: 'Use this list in your tools',
-        text: 'The same list is available as JSON and as a CSV file, for monitoring and automations. It refreshes every 10 minutes.',
-        fields: 'Each app has: name, type, status ("featured", "provisional" or "revoked"), since, sinceExact, partyIds and record. For a revoked app, since is the date its status was revoked.',
+        heading: 'Use this board in your tools',
+        text: 'The same board is available as JSON and as a CSV file, for monitoring and automations. It refreshes every 10 minutes.',
+        fields: 'Each application has: name, type, status, since, sinceExact, partyIds and record. status is one of featured, provisional, with_tokenomics, in_review, received, on_hold, not_approved, revoked, withdrawn and closed_process; since is the date the application reached it; record is the announcement, for apps that were approved.',
         copy: 'Copy',
         copyName: 'Copy the JSON feed address'
       },
       about: {
-        heading: 'About this list',
+        heading: 'About this board',
         items: [
           "It comes from the Featured App Committee's records and refreshes every 10 minutes.",
-          "Shown for each app: its name, Featured App type, status, the date it was featured, its Party ID and the public announcement. Nothing else from its application.",
-          'Apps whose status was revoked are listed separately, with the date it was revoked.',
-          '"By 7 Jul 2026" means the app was featured (or revoked) on or before that day: the records of when a status changed start in July 2026.'
+          'Shown for each application: its name, Featured App type, status, the date it reached that status and its Party ID, plus the public announcement once approved. Nothing else from it.',
+          '"By 7 Jul 2026" means the application reached its status on or before that day: the records of when a status changed start in July 2026.'
         ],
         apply: 'Applied and waiting? {link} with your email address.',
         applyLink: 'Check your own application'
@@ -497,12 +504,11 @@
         conditions: 'Conditions apply'  // provisional
       },
       provisionalFlag: 'Provisional',  // pill on the last step of a provisional app
-      // Side card on featured apps: what the public list shows about them.
+      // Side card on every application: what the public board shows about it.
       publicCard: {
-        heading: 'On the public list',
-        text: 'Your app is on the public list of featured apps, with its name, Featured App type, status, the date it was featured, its Party ID and the announcement. Nothing else from your application is public.',
-        revokedText: 'Your app is on the public list as revoked, with its name, Featured App type, the date its status was revoked, its Party ID and the announcement. Nothing else from your application is public.',
-        link: 'View the public list'
+        heading: 'On the public board',
+        text: 'Your application is on the public Featured App board, with its name, Featured App type, status, the date it reached that status and its Party ID, plus the announcement once approved. Nothing else from your application is public.',
+        link: 'View the public board'
       },
       // The final "stop" step when an application ended without, or lost,
       // Featured App status.
@@ -1653,18 +1659,18 @@
         historySection(app, words)
       ], [
         onFileSection(app),
-        FA_GRANTED.indexOf(state) !== -1 ? publicListCard(state) : null,
+        publicListCard(),
         dvpListSection(code, apps, app),
         helpCard(state === 'not_approved' ? TEXT.help.decision : TEXT.help.app)
       ], !tiles)
     ]);
   }
 
-  /** "On the public list": what everyone can see about a featured (or revoked) app, with a link to the list. */
-  function publicListCard(state) {
+  /** "On the public board": what everyone can see about an application, with a link to the board. */
+  function publicListCard() {
     const words = TEXT.fa.publicCard;
     return section('public', words.heading, [
-      el('p', { class: 'p-fine', text: state === 'revoked' ? words.revokedText : words.text }),
+      el('p', { class: 'p-fine', text: words.text }),
       el('a', { class: 'card-link', href: '#' + FEATURED_ROUTE, text: words.link })
     ]);
   }
@@ -2079,44 +2085,67 @@
     ]);
   }
 
-  // ---- The public list of featured apps
+  // ---- The public board
+
+  // Board statuses whose apps were approved: they show the announcement column.
+  const BOARD_ANNOUNCED = ['featured', 'provisional', 'revoked'];
 
   /**
-   * The public list (#featured): the numbers in the band, then search, type
-   * filters and one row per app, then the revoked apps (when any), then how
-   * to use the list in other tools. `list` is { updated, apps } from
-   * readFeatured(); `apiUrl` is the web app. The search covers both lists.
-   * Searching and filtering re-render the rows only, so focus stays put.
+   * The public board (#featured): the numbers in the band, then search, the
+   * status toggles and the type filter, then one table per status
+   * (TEXT.featured.statusOrder), then how to use the board in other tools.
+   * `list` is { updated, apps } from readFeatured(); `apiUrl` is the web app.
+   * A table is left out when its status is turned off or nothing in it
+   * matches. Searching and filtering re-render the rows only, so focus stays.
    */
   function showFeatured(list, apiUrl) {
     const w = TEXT.featured;
-    const isRevoked = function (app) { return app.status === 'revoked'; };
-    const apps = list.apps.filter(function (app) { return !isRevoked(app); });
-    const revoked = list.apps.filter(isRevoked);
+    const apps = list.apps.filter(function (app) { return hasOwn(w.status, app.status); });
     const filters = featuredFilters(apps);
-    const state = { filter: filters[0], query: '' };
+    const state = { filter: filters[0], query: '', hidden: {} };
+    const ofStatus = function (key) { return apps.filter(function (app) { return app.status === key; }); };
 
-    const rows = el('ul', { class: 'pub-list' });
-    const revokedRows = el('ul', { class: 'pub-list' });
+    const tables = w.statusOrder.filter(function (key) { return ofStatus(key).length; }).map(function (key) {
+      const words = w.status[key];
+      const rows = el('ul', { class: 'pub-list' });
+      const count = el('span', { class: 'filter-count' });
+      const section = el('section', { class: 'card pub-card', 'data-section': 'status', 'data-status': key, 'aria-labelledby': 'pub-h-' + key }, [
+        el('h2', { class: 'card-h', id: 'pub-h-' + key }, [words.heading, ' ', count]),
+        el('div', { class: 'pub-head', 'aria-hidden': 'true' }, [
+          el('span', { text: w.columns.app }), el('span', { text: w.columns.type }), el('span', { text: w.columns.status }),
+          el('span', { text: words.since }), el('span', { text: BOARD_ANNOUNCED.indexOf(key) !== -1 ? w.columns.record : '' })
+        ]),
+        rows
+      ]);
+      return { key: key, apps: ofStatus(key), rows: rows, count: count, section: section };
+    });
+
     const foot = el('p', { class: 'pub-foot', 'aria-live': 'polite' });
+    const empty = el('p', { class: 'card pub-empty' });
     const updated = historyTime(list.updated);
     function render() {
       const query = state.query.trim().toLowerCase();
       const matches = function (app) {
+        if (!state.filter.test(app)) return false;
         if (!query) return true;
         return textOf(app.name).toLowerCase().indexOf(query) !== -1 ||
           partyIdsOf(app).some(function (id) { return id.toLowerCase().indexOf(query) !== -1; });
       };
-      const shown = apps.filter(state.filter.test).filter(matches);
-      rows.textContent = '';
-      append(rows, shown.length ? shown.map(featuredRow) : el('li', { class: 'pub-empty', text: apps.length ? w.empty : w.none }));
+      let shownTotal = 0;
+      tables.forEach(function (table) {
+        const shown = state.hidden[table.key] ? [] : table.apps.filter(matches);
+        shownTotal += shown.length;
+        table.section.hidden = !shown.length;
+        table.count.textContent = String(shown.length);
+        table.rows.textContent = '';
+        append(table.rows, shown.map(featuredRow));
+      });
+      empty.hidden = shownTotal > 0;
+      empty.textContent = apps.length ? w.empty : w.none;
       foot.textContent = joinParts([
-        fillText(w.showing, { shown: String(shown.length), total: String(apps.length) }),
+        fillText(w.showing, { shown: String(shownTotal), total: String(apps.length) }),
         updated ? fillText(w.updated, { day: updated.day, time: updated.time }) : ''
       ]);
-      const shownRevoked = revoked.filter(matches);
-      revokedRows.textContent = '';
-      append(revokedRows, shownRevoked.length ? shownRevoked.map(featuredRow) : el('li', { class: 'pub-empty', text: w.revoked.empty }));
     }
 
     const search = el('input', {
@@ -2124,6 +2153,20 @@
     });
     search.addEventListener('input', function () { state.query = search.value; render(); });
 
+    // Status toggles: each shows or hides its table (several can be on).
+    const toggles = tables.map(function (table) {
+      const button = el('button', { class: 'filter', type: 'button', 'aria-pressed': 'true', 'data-status': table.key }, [
+        w.status[table.key].label, ' ', el('span', { class: 'filter-count', text: String(table.apps.length) })
+      ]);
+      button.addEventListener('click', function () {
+        state.hidden[table.key] = !state.hidden[table.key];
+        button.setAttribute('aria-pressed', String(!state.hidden[table.key]));
+        render();
+      });
+      return button;
+    });
+
+    // Type chips: one at a time.
     const chips = filters.map(function (f) {
       const button = el('button', { class: 'filter', type: 'button', 'aria-pressed': String(f === state.filter), 'data-filter': f.key }, [
         f.label, ' ', el('span', { class: 'filter-count', text: String(f.count) })
@@ -2139,12 +2182,14 @@
     const feedUrl = apiUrl + (apiUrl.indexOf('?') === -1 ? '?' : '&') + 'view=featured';
     const feedLink = parseHttpsUrl(feedUrl);
     const csvLink = parseHttpsUrl(feedUrl + '&format=csv');
-    const provisional = apps.filter(function (app) { return app.status === 'provisional'; }).length;
-    const assetMoving = apps.filter(function (app) { return textOf(app.type) === w.assetMovingType; }).length;
+    const featured = apps.filter(function (app) { return app.status === 'featured' || app.status === 'provisional'; });
+    const provisional = ofStatus('provisional').length;
+    const assetMoving = featured.filter(function (app) { return textOf(app.type) === w.assetMovingType; }).length;
     const stats = [
-      { label: w.stats.total, value: apps.length },
+      { label: w.stats.total, value: featured.length },
       { label: w.stats.assetMoving, value: assetMoving },
-      provisional ? { label: w.stats.provisional, value: provisional, warn: true } : null
+      provisional ? { label: w.stats.provisional, value: provisional, warn: true } : null,
+      { label: w.stats.all, value: apps.length }
     ].filter(Boolean);
 
     show('featured', w.title, [
@@ -2168,23 +2213,17 @@
             feedLink ? externalLink(feedLink, w.json, 'p-btn secondary') : null
           ])
         ]),
-        el('div', { class: 'filters', role: 'group', 'aria-label': w.filtersLabel }, chips),
-        el('div', { class: 'pub-head', 'aria-hidden': 'true' }, [
-          el('span', { text: w.columns.app }), el('span', { text: w.columns.type }), el('span', { text: w.columns.status }),
-          el('span', { text: w.columns.since }), el('span', { text: w.columns.record })
+        toggles.length ? el('div', { class: 'pub-group' }, [
+          el('p', { class: 'pub-group-label', id: 'pub-statuses' }, [w.statusesLabel, el('span', { class: 'muted', text: ' · ' + w.statusesHint })]),
+          el('div', { class: 'filters', role: 'group', 'aria-labelledby': 'pub-statuses', 'data-toggles': 'status' }, toggles)
+        ]) : null,
+        el('div', { class: 'pub-group' }, [
+          el('p', { class: 'pub-group-label', id: 'pub-types', text: w.typesLabel }),
+          el('div', { class: 'filters', role: 'group', 'aria-labelledby': 'pub-types', 'data-toggles': 'type' }, chips)
         ]),
-        rows,
         foot
       ])),
-      revoked.length ? el('div', { class: 'wrap pub-gap' }, el('section', { class: 'card pub-card', 'data-section': 'revoked', 'aria-labelledby': 'pub-revoked-h' }, [
-        el('h2', { class: 'card-h', id: 'pub-revoked-h' }, [w.revoked.heading, ' ', el('span', { class: 'filter-count', text: String(revoked.length) })]),
-        el('p', { class: 'p-fine', text: w.revoked.intro }),
-        el('div', { class: 'pub-head', 'aria-hidden': 'true' }, [
-          el('span', { text: w.columns.app }), el('span', { text: w.columns.type }), el('span', { text: w.columns.status }),
-          el('span', { text: w.columns.revokedOn }), el('span', { text: w.columns.record })
-        ]),
-        revokedRows
-      ])) : null,
+      el('div', { class: 'wrap pub-tables' }, tables.map(function (table) { return table.section; }).concat(empty)),
       el('div', { class: 'wrap pub-more' }, [
         feedLink ? el('section', { class: 'card pub-feed', 'data-section': 'feed' }, [
           el('h2', { class: 'card-h', text: w.feed.heading }),
@@ -2206,20 +2245,18 @@
   }
 
   /**
-   * The filter chips: "All", one per FA Type label in the data
-   * (TEXT.featured.typeOrder first), "Type not set" and "Provisional" when
-   * any app has them. Each is { key, label, count, test(app) }.
+   * The type chips: "All types", one per FA Type label in the data
+   * (TEXT.featured.typeOrder first) and "Type not set" when any application
+   * has none. Each is { key, label, count, test(app) }.
    */
   function featuredFilters(apps) {
     const w = TEXT.featured;
     const types = {};
     let none = 0;
-    let provisional = 0;
     apps.forEach(function (app) {
       const type = textOf(app.type);
       if (type) types[type] = (types[type] || 0) + 1;
       else none += 1;
-      if (app.status === 'provisional') provisional += 1;
     });
     const rank = function (type) {
       const i = w.typeOrder.indexOf(type);
@@ -2230,7 +2267,6 @@
       filters.push({ key: 'type', label: type, count: types[type], test: function (app) { return textOf(app.type) === type; } });
     });
     if (none) filters.push({ key: 'none', label: w.filters.none, count: none, test: function (app) { return !textOf(app.type); } });
-    if (provisional) filters.push({ key: 'provisional', label: w.filters.provisional, count: provisional, test: function (app) { return app.status === 'provisional'; } });
     return filters;
   }
 
@@ -2240,30 +2276,31 @@
   }
 
   /**
-   * One app on the public list: name, type, status, since (the date it was
-   * featured, or revoked), announcement, then its Party IDs (with copy
-   * buttons) on a line of their own. Each cell starts with its column name
-   * for screen readers (the header row is visual).
+   * One application on the public board: name, type, status, the date it
+   * reached that status, the announcement (for apps that were approved),
+   * then its Party IDs (with copy buttons) on a line of their own. Each cell
+   * starts with its column name for screen readers (the header row is visual).
    */
   function featuredRow(app) {
     const w = TEXT.featured;
+    const words = w.status[app.status];
     const name = textOf(app.name) || TEXT.fa.untitled;
     const type = textOf(app.type);
-    const status = hasOwn(w.status, app.status) ? w.status[app.status] : w.status.featured;
     const date = formatDate(app.since);
     const since = date && app.sinceExact === false ? fillText(w.sinceBy, { date: date }) : date;
-    const record = parseHttpsUrl(app.record);
+    const announced = BOARD_ANNOUNCED.indexOf(app.status) !== -1;
+    const record = announced ? parseHttpsUrl(app.record) : null;
     const ids = partyIdsOf(app);
     const label = function (text) { return el('span', { class: 'visually-hidden', text: text + ': ' }); };
-    return el('li', { class: 'pub-row', 'data-status': hasOwn(w.status, app.status) ? app.status : 'featured' }, [
+    return el('li', { class: 'pub-row', 'data-status': app.status }, [
       el('span', { class: 'pub-name', text: name }),
       el('span', { class: 'pub-type' + (type ? '' : ' muted') }, [label(w.columns.type), type || w.typeNotSet]),
-      el('span', { class: 'pub-status' }, [label(w.columns.status), pill(status.label, status.tone)]),
-      el('span', { class: 'pub-since' }, [label(app.status === 'revoked' ? w.columns.revokedOn : w.columns.since), since || '—']),
-      el('span', { class: 'pub-record' }, [
+      el('span', { class: 'pub-status' }, [label(w.columns.status), pill(words.label, words.tone)]),
+      el('span', { class: 'pub-since' }, [label(words.since), since || '—']),
+      el('span', { class: 'pub-record' }, announced ? [
         label(w.columns.record),
         record ? externalLink(record, w.record) : el('span', { class: 'muted', text: w.noRecord })
-      ]),
+      ] : null),
       el('div', { class: 'pub-party' }, ids.length ? ids.map(function (id) {
         return el('span', { class: 'pub-party-row' }, [
           el('span', { class: 'pub-party-label', text: w.partyId }),
@@ -2275,7 +2312,7 @@
     ]);
   }
 
-  /** Reads the public list's JSON body: { updated, apps }, or null for anything unusable. */
+  /** Reads the public board's JSON body: { updated, apps }, or null for anything unusable. */
   function readFeatured(body) {
     if (!isObject(body) || body.error || !Array.isArray(body.apps)) return null;
     return { updated: textOf(body.updated), apps: body.apps.filter(isObject) };

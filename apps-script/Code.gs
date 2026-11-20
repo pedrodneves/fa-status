@@ -27,7 +27,7 @@
  * ------------------
  *   doPost(e)   the page's form: "email me my link"
  *   doGet(e)    the page asks for one token's applications, or (with
- *               ?view=featured) for the public list of featured apps
+ *               ?view=featured) for the public board of applications and their statuses
  *   refresh()   every 10 minutes: read both boards, rebuild the cache
  *
  * FLOW 1: REQUESTING A LINK (page form -> doPost)
@@ -57,19 +57,17 @@
  *        the same name (see matchDvpToApps_).
  *     3. Builds, for every email address found on the FA board, the list of
  *        that address's applications (allow-listed fields only).
- *     4. Builds the public list: every app with Featured App status, then
- *        every app whose status was revoked.
+ *     4. Builds the public board: every application with its status.
  *     5. Writes all 64 cache shards and the public list in one call (6-hour
  *        expiry).
  *     6. Logs ONE JSON line of counts. Never addresses, tokens or names.
  *
- * FLOW 4: THE PUBLIC LIST (page or anyone -> doGet ?view=featured)
- *   Anyone can read it: it is the same for everyone and holds no applicant
- *   data beyond what is already public once an app is featured.
+ * FLOW 4: THE PUBLIC BOARD (page or anyone -> doGet ?view=featured)
+ *   Anyone can read it: it is the same for everyone and holds a few fields
+ *   per application, nothing else from it.
  *     a. GET <exec URL>?view=featured answers {updated, apps: [...]}, one
- *        entry per app with Featured App status or whose status was
- *        revoked: name, FA Type, status, since, Party IDs and the
- *        announcement link (toPublicView_).
+ *        entry per application: name, FA Type, status, since, Party IDs
+ *        and, once approved, the announcement link (toPublicView_).
  *     b. Adding &format=csv answers the same list as a CSV file.
  *     c. A cache miss rebuilds from Monday under the lock, as in flow 2.
  *
@@ -103,11 +101,10 @@
  *   - Only allow-listed columns (plus the two email columns) are requested
  *     from Monday, and the answer is built field by field in
  *     toApplicantView(), so nothing else can leak.
- *   - The public list holds only apps with Featured App status or whose
- *     status was revoked, and only
- *     their name, FA Type, status, date, Party IDs and announcement link
- *     (toPublicView_). The institution, the review's progress and everything
- *     else stay private.
+ *   - The public board holds, per application, only its name, FA Type,
+ *     status, the date of that status, Party IDs and, once approved, the
+ *     announcement link (toPublicView_). The institution, addresses, the
+ *     review's details and everything else stay private.
  *   - Email addresses are only used to compute tokens and to send the link to
  *     that same address. They are never cached, logged or returned.
  *   - Logs carry counts, unknown board labels and short error kinds only.
@@ -236,8 +233,8 @@ const PARTY_IDS_MAX = 5;     // party ids per app on the public list
 const URL_MAX = 2000;        // website, announcement, DVP request link
 const LOG_LABEL_MAX = 60;    // unknown labels as written to the log
 
-// The public list as a CSV file (GET ?view=featured&format=csv).
-const CSV_FILE_NAME = 'featured-apps.csv';
+// The public board as a CSV file (GET ?view=featured&format=csv).
+const CSV_FILE_NAME = 'featured-app-board.csv';
 const CSV_COLUMNS = ['name', 'type', 'status', 'since', 'since_exact', 'party_ids', 'record'];
 
 // -----------------------------------------------------------------------------
@@ -276,16 +273,30 @@ const FA_STATE_EMPTY = 'received';
 const FA_STATE_UNKNOWN = 'in_review';
 
 /**
- * FA states on the public list -> their status there: apps with Featured App
- * status, and apps whose status was revoked (the committee decided on 20 Nov
- * 2026 to list those too). Only apps in these states are listed publicly,
- * and only they get their announcement link sent.
+ * FA state -> its status on the public board, which lists every application
+ * (as the public board on intro.canton.foundation does, with fewer fields).
+ * The key order is the board's order: featured apps first.
  */
 const PUBLIC_STATUS_BY_STATE = {
   approved: 'featured',
   provisional: 'provisional',
-  revoked: 'revoked'
+  with_tokenomics: 'with_tokenomics',
+  in_review: 'in_review',
+  received: 'received',
+  on_hold: 'on_hold',
+  not_approved: 'not_approved',
+  revoked: 'revoked',
+  withdrawn: 'withdrawn',
+  closed_process: 'closed_process'
 };
+const PUBLIC_STATUS_ORDER = Object.keys(PUBLIC_STATUS_BY_STATE).map((state) => PUBLIC_STATUS_BY_STATE[state]);
+
+/**
+ * FA states whose announcement link (FA Link) is sent: on the public board
+ * (record) and on the applicant's page. Apps that were approved, even if
+ * their status was later revoked.
+ */
+const ANNOUNCED_STATES = ['approved', 'provisional', 'revoked'];
 
 /** FA Status labels that mean the Canton Coin lock is confirmed (lock.confirmed). */
 const FA_LOCKED_LABELS = ['0-Locked+Needs Review'];
@@ -532,8 +543,8 @@ function setup() {
     refreshed: Boolean(stats),
     faRows: stats ? stats.faRows : 0,
     addresses: stats ? stats.addresses : 0,
+    listed: stats ? stats.listed : 0,
     featured: stats ? stats.featured : 0,
-    revoked: stats ? stats.revoked : 0,
     dvpMatched: stats ? stats.dvpMatched : 0,
     dvpUnmatched: stats ? stats.dvpUnmatched : 0
   }));
@@ -1213,8 +1224,7 @@ function rebuild_(mode) {
  *   2. Read the DVP board and attach each request to its FA app(s) by name.
  *   3. For each FA row: build its view once, then add it to the list of every
  *      address on the row. Rows without an address can't be reached.
- *      Rows with Featured App status, or whose status was revoked, also go
- *      on the public list.
+ *      Every row also goes on the public board (toPublicView_).
  *   4. Sort each list newest first.
  *
  * @param {Object} cfg Config from readConfig_() (already validated).
@@ -1259,8 +1269,8 @@ function buildViews_(cfg, stats) {
     views[token] = { apps: appsByToken[token].sort(compareNewestFirst_) };
   });
   stats.addresses = Object.keys(views).length;
-  stats.revoked = featured.filter((app) => app.status === 'revoked').length;
-  stats.featured = featured.length - stats.revoked;
+  stats.listed = featured.length;
+  stats.featured = featured.filter((app) => app.status === 'featured' || app.status === 'provisional').length;
   return {
     views: views,
     featured: { updated: new Date().toISOString().slice(0, 19) + 'Z', apps: featured.sort(comparePublic_) }
@@ -1703,8 +1713,8 @@ function stateFor_(label, map, emptyState, unknownState, stats, bucket) {
  *   website, announcement, update {kind, date}, updated, dvp[]
  *
  * Texts are capped and empty ones become null. Links are https-only,
- * otherwise null. announcement is only sent once the app is on the public
- * list (approved, provisional or revoked). amountMillions is
+ * otherwise null. announcement is only sent once the app was approved
+ * (ANNOUNCED_STATES: approved, provisional, revoked). amountMillions is
  * only set when above 0. lock.confirmed is true when the FA Status says the
  * lock is in place (FA_LOCKED_LABELS). doGet adds history (see 8b). updated
  * is the latest change among FA Status,
@@ -1741,7 +1751,7 @@ function toApplicantView(row, dvpRows, stats) {
     testing: testingState_(statusText_(cols[FA_COLUMNS.testing]), stats),
     partyId: capText_(longTextOf_(cols[FA_COLUMNS.partyId]), PARTY_ID_MAX),
     website: httpsUrl_(linkOf_(cols[FA_COLUMNS.website]).url),
-    announcement: hasOwn_(PUBLIC_STATUS_BY_STATE, state) ? httpsUrl_(linkOf_(cols[FA_COLUMNS.announcement]).url) : null,
+    announcement: ANNOUNCED_STATES.indexOf(state) !== -1 ? httpsUrl_(linkOf_(cols[FA_COLUMNS.announcement]).url) : null,
     update: emailUpdate_(cols[FA_COLUMNS.sendEmail], stats),
     updated: latestChangeDate_([
       cols[FA_COLUMNS.status],
@@ -1844,22 +1854,22 @@ function compareNewestFirst_(a, b) {
 // -----------------------------------------------------------------------------
 
 /**
- * One entry of the public list from a raw FA item, or null when the app
- * isn't listed (PUBLIC_STATUS_BY_STATE). Only these fields are ever made
- * public:
+ * One entry of the public board from a raw FA item. Only these fields are
+ * ever made public:
  *
  *   name        the item name
  *   type        the FA Type label (null when not set yet)
- *   status      'featured', 'provisional' or 'revoked'
+ *   status      the board status (PUBLIC_STATUS_BY_STATE), e.g. 'featured'
  *   since       'YYYY-MM-DD': when the FA Status last changed to its
- *               current label (value.changed_at): the date the app was
- *               featured, or, for a revoked app, the date it was revoked...
+ *               current label (value.changed_at): the date the app reached
+ *               its status...
  *   sinceExact  ...true then. Monday has no change date for rows imported
  *               when the board was created (July 2026), so `since` is the
  *               item's creation date instead and sinceExact is false: the
- *               app was featured (or revoked) on or before that day.
+ *               app reached its status on or before that day.
  *   partyIds    the Canton party IDs in the Party ID cell (PARTY_ID_FIND_RE)
- *   record      the FA Link (the public announcement), https only
+ *   record      the FA Link (the public announcement), https only, and only
+ *               for apps that were approved (ANNOUNCED_STATES)
  *
  * @param {Object} row Raw FA item {id, name, created_at, column_values}.
  * @param {Object=} stats Run stats (partyIdUnreadable).
@@ -1868,7 +1878,7 @@ function compareNewestFirst_(a, b) {
 function toPublicView_(row, stats) {
   const cols = columnMap_(row);
   const state = faState_(statusText_(cols[FA_COLUMNS.status])); // unknown labels are counted by toApplicantView
-  if (!hasOwn_(PUBLIC_STATUS_BY_STATE, state)) return null;
+  if (!hasOwn_(PUBLIC_STATUS_BY_STATE, state)) return null; // every state is listed; kept as a guard
   const changed = latestChangeDate_([cols[FA_COLUMNS.status]]);
   const createdMs = parseIsoMs_(row ? row.created_at : null);
   const partyText = longTextOf_(cols[FA_COLUMNS.partyId]);
@@ -1881,7 +1891,7 @@ function toPublicView_(row, stats) {
     since: changed || (createdMs === null ? null : new Date(createdMs).toISOString().slice(0, 10)),
     sinceExact: Boolean(changed),
     partyIds: partyIds,
-    record: httpsUrl_(linkOf_(cols[FA_COLUMNS.announcement]).url)
+    record: ANNOUNCED_STATES.indexOf(state) !== -1 ? httpsUrl_(linkOf_(cols[FA_COLUMNS.announcement]).url) : null
   };
 }
 
@@ -1901,8 +1911,8 @@ function partyIdsOf_(text) {
 }
 
 /**
- * Sort order for the public list: apps with Featured App status before
- * revoked ones; within each, the most recent date first, undated ones last,
+ * Sort order for the public board: by status (PUBLIC_STATUS_ORDER, featured
+ * first); within a status, the most recent date first, undated ones last,
  * then by name.
  *
  * @param {Object} a A public entry.
@@ -1910,8 +1920,8 @@ function partyIdsOf_(text) {
  * @return {number} Negative when a comes first.
  */
 function comparePublic_(a, b) {
-  const revokedA = a.status === 'revoked';
-  if (revokedA !== (b.status === 'revoked')) return revokedA ? 1 : -1;
+  const order = PUBLIC_STATUS_ORDER.indexOf(a.status) - PUBLIC_STATUS_ORDER.indexOf(b.status);
+  if (order) return order;
   if (a.since !== b.since) {
     if (!a.since) return 1;
     if (!b.since) return -1;
@@ -2402,9 +2412,9 @@ function newStats_(mode) {
     addresses: 0,         // distinct addresses that can get a link
     dvpMatched: 0,        // DVP requests attached to at least one FA app
     dvpUnmatched: 0,      // DVP requests whose name matches no FA app
-    featured: 0,          // apps on the public list with Featured App status
-    revoked: 0,           // apps on the public list whose status was revoked
-    partyIdUnreadable: 0, // of those, apps whose Party ID cell holds no well-formed ID
+    listed: 0,            // applications on the public board
+    featured: 0,          // of those, apps with Featured App status (featured or provisional)
+    partyIdUnreadable: 0, // of those listed, apps whose Party ID cell holds no well-formed ID
     cacheLargestShard: 0, // bytes
     ms: 0,
     unknownLabels: { fa: {}, testing: {}, dvp: {}, dvpStatus: {}, email: {} }
